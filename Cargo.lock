@@ -1724,6 +1724,7 @@ dependencies = [
  "figcraft-pathops",
  "figcraft-render",
  "figcraft-text",
+ "figcraft-uitk",
  "image",
  "log",
  "serde",

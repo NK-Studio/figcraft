@@ -1,7 +1,9 @@
 # Unity UI Toolkit: structure mapping, compatibility and sync
 
-> **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`). U2–U5 planned.
-> **Owner area:** `crates/uitk` (L2), `crates/engine/src/cmd/unity.rs` (L5).
+> **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`); U2 landed (file
+> settings, layer position and pivot, the right panel's Unity section). U3–U5 planned.
+> **Owner area:** `crates/uitk` (L2), `UnitySettings` / `Pivot` in `crates/doc` (L1),
+> `crates/engine/src/cmd/unity.rs` (L5), `crates/ui-egui/src/unity_panel.rs` (L6).
 > **Related:** [`device-profiles.md`](device-profiles.md) (devices, safe areas, device frames).
 
 ## Goal
@@ -139,18 +141,44 @@ the current page) and reports, per layer, what the target version can't represen
 | `text-features` | — | lists, paragraph indents, decoration styles (thickness, offset, colour) | — |
 | `text-runs` | — | — | mixed styles (rich text tags) |
 | `text-fill` | — | gradient/image text fills (text colour is solid; baked) | — |
+| `pivot` | — | a pivot set on a layer that isn't absolute (ignored) | — |
 | `z-order` | — | — | "first on top" stacking: before 6.7 children reversed with a `*-reverse` direction; 6.7+ `z-index` |
 
 Rules marked "to confirm" in the tables above are rechecked by the U4 harness and the table is
 updated with what Unity actually does.
 
+## Unity data in the file (U2)
+
+- **File:** `Document::unity: Option<UnitySettings {version, grid}>` — the target Unity version
+  and whether the project turns on UITK's experimental grid layout. Saved with the file and synced
+  in live sessions (`DocProp::Unity`). `unity.check` uses it unless told otherwise.
+- **Position** isn't stored separately: it follows from the structure, as UITK's does. A
+  top-level frame is the panel's **root**; a layer in an auto layout frame is **relative** unless it
+  ignores auto layout (Figma's absolute flag, `child_layout.absolute`); every other layer is
+  **absolute**. `unity.layer.set {position}` switches the absolute flag (only in auto layout).
+- **Pivot:** `Node::pivot: Option<Pivot {x, y}>` (0–1 each). `None` means the pivot the
+  constraints imply: left/top → 0, centre → 0.5, right/bottom → 1, stretch and scale → 0. A pivot
+  only places absolute layers; one set on another layer is reported by the `pivot` rule.
+
+| Command | Params | Result |
+|---|---|---|
+| `unity.settings` | `{}` | `{version, grid, versions}` |
+| `unity.settings.set` | `{version?, grid?}` (undo step) | the settings |
+| `unity.layer` | `{id}` | `{position, inAutoLayout, pivot, pivotSet, anchorH, anchorV}` |
+| `unity.layer.set` | `{ids?, pivot? ([x, y], {x, y}, a name like "center", or null), position? ("relative" \| "absolute")}` (undo step) | `{ids}` |
+
+**Right panel:** with nothing selected, *Unity UI Toolkit* shows the target version (a dropdown,
+6.0 to the newest the table knows), the experimental grid checkbox from 6.7, and the page's check
+counts with the first issues. With layers selected, it shows the first layer's position (a
+Relative/Absolute switch inside auto layout), for absolute layers the 9-point pivot picker (the
+pivot as numbers, whether it comes from the constraints or the layer, Reset), and the selection's
+counts and issues; clicking an issue selects its layer. Results are cached per document revision.
+
 ## Phases
 
 - **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),
   `unity.check`.
-- **U2 — Unity data on layers**: target version per file, per-layer pivot and position mode, a
-  Unity section in the right panel (9-point pivot/anchor picker, the check's results on the
-  selection).
+- **U2 — Unity data on layers** (landed): see [Unity data in the file](#unity-data-in-the-file-u2).
 - **U3 — UXML/USS export**: `file.exportUitk` writing UXML + USS per frame, version-aware
   conversions (gap → margins, gradients/shadows → baked images before their version), the SafeArea
   container, and the panel-scale rule; the Unity-side runtime pieces (SafeArea element, panel scale)

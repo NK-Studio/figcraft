@@ -77,7 +77,7 @@ pub fn check(doc: &Document, roots: &[NodeId], opts: CheckOptions) -> Vec<Issue>
             if !n.visible {
                 continue;
             }
-            Checker { n, opts, out: &mut out }.node();
+            Checker { doc, n, opts, out: &mut out }.node();
             // A vector or boolean group is one image; its operands aren't elements of their own.
             if !is_vector(&n.kind) {
                 stack.extend(n.children.iter().rev().copied());
@@ -105,6 +105,7 @@ fn is_plain_blend(b: BlendMode) -> bool {
 }
 
 struct Checker<'a> {
+    doc: &'a Document,
     n: &'a Node,
     opts: CheckOptions,
     out: &'a mut Vec<Issue>,
@@ -131,6 +132,9 @@ impl Checker<'_> {
             } else {
                 self.push(Severity::Warning, "vector", format!("vector shapes are baked into an image before Unity {since}"), Some(since));
             }
+        }
+        if n.pivot.is_some() && crate::layer_info(self.doc, n.id).is_some_and(|i| i.position != crate::Position::Absolute) {
+            self.push(Severity::Warning, "pivot", "the pivot only places absolute layers: this one is placed by its parent", None);
         }
         if n.is_mask {
             self.push(Severity::Error, "mask", "masks have no UITK equivalent (only clip content: `overflow: hidden`)", None);

@@ -63,6 +63,7 @@ pub mod theme;
 pub mod toolbar;
 pub mod typography;
 pub mod ui_scale;
+pub mod unity_panel;
 pub mod variable_ui;
 pub mod variables_panel;
 pub mod vector_panel;

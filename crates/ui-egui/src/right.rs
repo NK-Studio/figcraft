@@ -389,6 +389,8 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
         grids(app, ui, &doc, &sel);
         widgets::separator(ui);
     }
+    crate::unity_panel::layer_section(app, ui, &doc, &sel);
+    widgets::separator(ui);
     crate::export_panel::section(app, ui, &doc, &sel);
 }
 
@@ -450,6 +452,8 @@ fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     widgets::separator(ui);
     widgets::section_header(ui, tr("Local styles"), &[], figcraft_engine::library::local_styles(doc).next().is_none());
     crate::style_picker::local_styles(app, ui, doc);
+    widgets::separator(ui);
+    crate::unity_panel::file_section(app, ui, doc);
     widgets::separator(ui);
     crate::export_panel::page_section(app, ui, doc, page);
 }

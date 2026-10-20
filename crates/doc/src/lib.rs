@@ -199,6 +199,19 @@ pub struct Document {
     /// [`handoff`]).
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub dev_snapshots: BTreeMap<NodeId, Arc<DevSnapshot>>,
+    /// Unity UI Toolkit settings (`None`: the defaults, Unity 6.0 without grid layout).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unity: Option<UnitySettings>,
+}
+
+/// A file's Unity UI Toolkit settings (`docs/unity-uitk.md`).
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct UnitySettings {
+    /// The Unity version the file targets ("6.0", "6.3", …).
+    pub version: String,
+    /// The Unity project turns on UI Toolkit's experimental grid layout (6.7+).
+    pub grid: bool,
 }
 
 impl Default for Document {
@@ -237,6 +250,7 @@ impl Document {
             image_presets: Vec::new(),
             annotation_categories: None,
             dev_snapshots: BTreeMap::new(),
+            unity: None,
         }
     }
 

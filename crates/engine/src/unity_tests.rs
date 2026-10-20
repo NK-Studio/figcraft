@@ -48,3 +48,65 @@ fn grid_option_and_refusals() {
     s.execute("unity.check", &json!({})).unwrap();
     assert_eq!(s.ds().unwrap().history.undo.len(), before);
 }
+
+#[test]
+fn file_settings_drive_the_check_and_undo() {
+    let mut s = Session::new();
+    let f = frame_with_gap(&mut s);
+    assert_eq!(s.execute("unity.settings", &json!({})).unwrap()["version"], "6.0");
+    let r = s.execute("unity.settings.set", &json!({"version": "6000.7", "grid": true})).unwrap();
+    assert_eq!((r["version"].clone(), r["grid"].clone()), (json!("6.7"), json!(true)));
+    assert_eq!(r["versions"].as_array().unwrap().len(), 8);
+    // The check takes the file's version unless told otherwise.
+    let c = s.execute("unity.check", &json!({"ids": [f]})).unwrap();
+    assert_eq!((c["version"].clone(), c["counts"]["info"].clone()), (json!("6.7"), json!(0)));
+    assert_eq!(s.execute("unity.check", &json!({"ids": [f], "version": "6.0"})).unwrap()["counts"]["info"], 1);
+    // Saved with the file, one undo step.
+    let doc = s.doc().unwrap().clone();
+    let back: figcraft_doc::Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
+    assert_eq!(back.unity, doc.unity);
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(s.execute("unity.settings", &json!({})).unwrap()["version"], "6.0");
+    assert!(s.execute("unity.settings.set", &json!({"version": "5.6"})).is_err());
+    assert!(s.execute("unity.settings.set", &json!({"grid": "maybe"})).is_err());
+}
+
+#[test]
+fn layer_position_and_pivot() {
+    let mut s = Session::new();
+    let row = frame_with_gap(&mut s);
+    let child = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 20, "height": 20, "parent": row})).unwrap()["id"].as_u64().unwrap();
+    let free = s.execute("frame.create", &json!({"x": 400, "y": 0, "width": 200, "height": 200})).unwrap()["id"].as_u64().unwrap();
+    let inside = s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 20, "height": 20, "parent": free})).unwrap()["id"].as_u64().unwrap();
+    let info = |s: &mut Session, id: u64| s.execute("unity.layer", &json!({"id": id})).unwrap();
+    assert_eq!(info(&mut s, row)["position"], "root");
+    assert_eq!(info(&mut s, child)["position"], "relative");
+    let i = info(&mut s, inside);
+    assert_eq!((i["position"].clone(), i["pivotSet"].clone(), i["pivot"].clone()), (json!("absolute"), json!(false), json!({"x": 0.0, "y": 0.0})));
+    // Constraints imply the pivot until one is set.
+    s.execute("node.set", &json!({"id": inside, "props": {"constraints": {"horizontal": "right", "vertical": "center"}}})).unwrap();
+    assert_eq!(info(&mut s, inside)["pivot"], json!({"x": 1.0, "y": 0.5}));
+    s.execute("unity.layer.set", &json!({"ids": [inside], "pivot": "center"})).unwrap();
+    let i = info(&mut s, inside);
+    assert_eq!((i["pivot"].clone(), i["pivotSet"].clone()), (json!({"x": 0.5, "y": 0.5}), json!(true)));
+    assert_eq!(s.execute("node.get", &json!({"id": inside})).unwrap()["pivot"], json!({"x": 0.5, "y": 0.5}));
+    s.execute("unity.layer.set", &json!({"ids": [inside], "pivot": [0.25, 1]})).unwrap();
+    assert_eq!(info(&mut s, inside)["pivot"], json!({"x": 0.25, "y": 1.0}));
+    s.execute("unity.layer.set", &json!({"ids": [inside], "pivot": null})).unwrap();
+    assert_eq!(info(&mut s, inside)["pivotSet"], false);
+    // Position switches in auto layout only.
+    s.execute("unity.layer.set", &json!({"ids": [child], "position": "absolute"})).unwrap();
+    assert_eq!(info(&mut s, child)["position"], "absolute");
+    s.execute("unity.layer.set", &json!({"ids": [child], "position": "relative"})).unwrap();
+    assert_eq!(info(&mut s, child)["position"], "relative");
+    assert!(s.execute("unity.layer.set", &json!({"ids": [inside], "position": "relative"})).unwrap_err().to_string().contains("always absolute"));
+    assert!(s.execute("unity.layer.set", &json!({"ids": [row], "position": "absolute"})).is_err());
+    for bad in [json!([2, 0]), json!("sideways"), json!({"x": "NaN", "y": 0}), json!([0.5])] {
+        assert!(s.execute("unity.layer.set", &json!({"ids": [inside], "pivot": bad})).is_err(), "{bad}");
+    }
+    assert!(s.execute("unity.layer.set", &json!({"ids": [inside]})).is_err());
+    // A pivot on a layer in the flow is reported as ignored.
+    s.execute("unity.layer.set", &json!({"ids": [child], "pivot": "center"})).unwrap();
+    let c = s.execute("unity.check", &json!({"ids": [child]})).unwrap();
+    assert!(c["issues"].as_array().unwrap().iter().any(|i| i["rule"] == "pivot"), "{c}");
+}

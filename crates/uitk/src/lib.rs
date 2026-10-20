@@ -3,10 +3,12 @@
 //! layer, what the target version's UXML/USS can't represent exactly.
 
 mod check;
+mod layer;
 #[cfg(test)]
 mod tests;
 
 pub use check::{CheckOptions, Issue, Severity, check};
+pub use layer::{LayerInfo, Position, file_options, implied_pivot, layer_info};
 
 use serde::{Serialize, Serializer};
 
@@ -19,6 +21,13 @@ pub struct UnityVersion {
 impl UnityVersion {
     /// The oldest version supported, and the default target.
     pub const MIN: UnityVersion = UnityVersion { minor: 0 };
+    /// The newest version the feature table knows (later ones are checked as this one).
+    pub const LATEST_KNOWN: UnityVersion = UnityVersion { minor: 7 };
+
+    /// The versions from 6.0 to [`Self::LATEST_KNOWN`], for pickers.
+    pub fn known() -> impl Iterator<Item = UnityVersion> {
+        (Self::MIN.minor..=Self::LATEST_KNOWN.minor).map(Self::new)
+    }
 
     pub const fn new(minor: u8) -> Self {
         Self { minor }

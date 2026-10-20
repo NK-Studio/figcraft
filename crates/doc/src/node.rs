@@ -401,6 +401,26 @@ impl NodeKind {
     }
 }
 
+/// A point of a layer as a share of its size: (0, 0) the top-left corner, (1, 1) the bottom-right.
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Pivot {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Pivot {
+    pub const fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
+    }
+
+    /// Each share finite and within 0..=1 (a file can say anything).
+    pub fn clamped(self) -> Self {
+        let c = |v: f64| if v.is_finite() { v.clamp(0.0, 1.0) } else { 0.0 };
+        Self { x: c(self.x), y: c(self.y) }
+    }
+}
+
 /// A box with a top-left origin.
 #[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -600,6 +620,10 @@ pub struct Node {
     /// (`frame.device.set`; drawn while View ▸ Safe areas is on).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<DeviceFrame>,
+    /// The layer's own reference point for Unity UI Toolkit (`None`: the one its constraints
+    /// imply; see `docs/unity-uitk.md` › Pivot).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pivot: Option<Pivot>,
 }
 
 pub(crate) fn yes() -> bool {
@@ -711,6 +735,7 @@ impl Node {
             code_links: Vec::new(),
             dev_resources: Vec::new(),
             device: None,
+            pivot: None,
         }
     }
 

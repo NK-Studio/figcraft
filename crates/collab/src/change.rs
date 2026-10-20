@@ -182,6 +182,7 @@ node_props! {
     CodeLinks => code_links,
     DevResources => dev_resources,
     Device => device,
+    Pivot => pivot,
 }
 
 /// A document-level property. Lists of entries with ids (styles, comments, variable collections,
@@ -204,6 +205,8 @@ pub enum DocProp {
     AnnotationCategories,
     /// Enabled libraries and the assets copied from them (whole).
     Libraries,
+    /// Unity UI Toolkit settings (`null`: the defaults).
+    Unity,
     /// Every style, in order (fallback).
     Styles,
     /// Style ids in panel order.
