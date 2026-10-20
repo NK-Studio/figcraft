@@ -219,17 +219,43 @@ const MENU_MIN_W: f32 = 48.0;
 const MENU_PAD: f32 = 8.0;
 const MENU_GAP: f32 = 24.0;
 
-/// The style of popup menus: egui's, with text kept on one line (a menu grows to its widest item).
+/// The style of popup menus: egui's, dark in both themes ([`crate::theme::menu_visuals`]: the frame on
+/// the menu colour, under the white [`menu_row`] labels), with text kept on one line (a menu grows
+/// to its widest item).
 pub(crate) fn menu_style(s: &mut egui::Style) {
+    s.visuals = crate::theme::menu_visuals();
     egui::containers::menu::menu_style(s);
     s.wrap_mode = Some(egui::TextWrapMode::Extend);
 }
 
-/// The menu a dropdown or button opens: as wide as its widest row and at least as wide as
-/// `anchor`. egui measures a popup in a first, invisible pass as wide as the width it is given
-/// (else its 600 px default area width) and keeps the size measured; rows ([`menu_row`]) take the
-/// larger of that width and their content, so the menu fits its content. Chain `.width(w)` for a
-/// menu at least `w` wide.
+/// A popup menu ([`menu_popup`], [`context_popup`]): dark in both themes, its content drawn with
+/// the dark tokens ([`Tokens::get`] inside it answers them).
+#[must_use]
+pub struct Menu(egui::Popup<'static>);
+
+impl Menu {
+    /// At least `w` wide.
+    pub fn width(self, w: f32) -> Self {
+        Self(self.0.width(w))
+    }
+
+    pub fn id(self, id: egui::Id) -> Self {
+        Self(self.0.id(id))
+    }
+
+    pub fn close_behavior(self, b: egui::PopupCloseBehavior) -> Self {
+        Self(self.0.close_behavior(b))
+    }
+
+    /// Show the menu when it is open.
+    pub fn show<R>(self, content: impl FnOnce(&mut Ui) -> R) -> Option<egui::InnerResponse<R>> {
+        self.0.show(|ui| {
+            let ctx = ui.ctx().clone();
+            crate::theme::with_dark_tokens(&ctx, || content(ui))
+        })
+    }
+}
+
 /// The blend modes as menu items in groups (pass-through only for layers); the one picked.
 pub fn blend_menu(ui: &mut Ui, with_pass_through: bool) -> Option<BlendMode> {
     let mut picked = None;
@@ -245,13 +271,18 @@ pub fn blend_menu(ui: &mut Ui, with_pass_through: bool) -> Option<BlendMode> {
     picked
 }
 
-pub fn menu_popup(anchor: &egui::Response) -> egui::Popup<'static> {
-    egui::Popup::menu(anchor).width(anchor.rect.width().max(MENU_MIN_W)).style(menu_style)
+/// The menu a dropdown or button opens: as wide as its widest row and at least as wide as
+/// `anchor`. egui measures a popup in a first, invisible pass as wide as the width it is given
+/// (else its 600 px default area width) and keeps the size measured; rows ([`menu_row`]) take the
+/// larger of that width and their content, so the menu fits its content. Chain `.width(w)` for a
+/// menu at least `w` wide.
+pub fn menu_popup(anchor: &egui::Response) -> Menu {
+    Menu(egui::Popup::menu(anchor).width(anchor.rect.width().max(MENU_MIN_W)).style(menu_style))
 }
 
 /// A context menu (secondary click on `resp`) sized like [`menu_popup`].
-pub fn context_popup(resp: &egui::Response) -> egui::Popup<'static> {
-    egui::Popup::context_menu(resp).width(MENU_MIN_W).style(menu_style)
+pub fn context_popup(resp: &egui::Response) -> Menu {
+    Menu(egui::Popup::context_menu(resp).width(MENU_MIN_W).style(menu_style))
 }
 
 pub fn menu_item(ui: &mut Ui, label: &str, shortcut: &str) -> bool {
@@ -519,6 +550,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             .collect();
         let has_device = sel.iter().any(|i| doc.node(*i).is_some_and(|n| n.device.is_some()));
         menu_popup(&resp).width(260.0).show(|ui| {
+            let t = Tokens::get(ui.ctx());
             egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                 kind_items(app, ui, true);
                 ui.separator();

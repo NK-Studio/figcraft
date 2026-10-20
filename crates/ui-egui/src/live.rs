@@ -524,6 +524,7 @@ pub fn people_bar(app: &mut FigApp, ui: &mut Ui, area: Rect) {
     }
     icons::paint(ui.painter(), Rect::from_center_size(chev.center(), vec2(10.0, 10.0)), Icon::Chevron, t.icon_secondary);
     menu_popup(&cresp).width(220.0).show(|ui| {
+        let t = Tokens::get(ui.ctx());
         let row = |ui: &mut Ui, label: &str, fill: Color32, check: bool| {
             menu_item_with(ui, label, if check { tr("Following") } else { "" }, 22.0, |p, r, _| {
                 avatar(p, pos2(r.max.x - 15.0, r.center().y), 8.0, label, fill)

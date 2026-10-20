@@ -146,7 +146,6 @@ fn slot_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, nam
 /// The fill menu of slot `slot` inside an instance: its preferred components first, then every
 /// local component; select the slot; reset it to the main's default content.
 fn slot_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, preferred: &[NodeId], comps: &[(NodeId, String)], w: f32) {
-    let t = Tokens::get(ui.ctx());
     let edited = slot_edited(doc, slot);
     let label = match (edited, doc.node(slot).map_or(0, |n| n.children.len())) {
         (false, 0) => tr("Empty").to_string(),
@@ -155,6 +154,7 @@ fn slot_fill(app: &mut FigApp, ui: &mut Ui, doc: &Document, slot: NodeId, prefer
     };
     let resp = widgets::dropdown(ui, &label, w, Some(Icon::Slot)).on_hover_text(tr("Add content to this slot"));
     menu_popup(&resp).width(w.max(200.0)).show(|ui| {
+        let t = Tokens::get(ui.ctx());
         let insert = |app: &mut FigApp, c: NodeId| app.run("instance.slotInsert", json!({"id": slot, "component": c.0}));
         let heading = |ui: &mut Ui, text: &str| ui.label(egui::RichText::new(text).font(semibold(11.0)).color(t.text_secondary));
         if !preferred.is_empty() {
@@ -213,6 +213,7 @@ fn properties_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, owner: NodeId) {
     let fresh = (1..).map(|k| format!("Property {k}")).find(|n| !existing.contains(n)).unwrap_or_else(|| "Property".into());
     let plus = header_with_plus(ui, tr("Properties"), tr("Create component property"));
     menu_popup(&plus).width(180.0).show(|ui| {
+        let t = Tokens::get(ui.ctx());
         let swap_default = comps.iter().map(|(c, _)| *c).find(|c| *c != owner && first != Some(*c));
         let items: [(&str, &str, Value); 4] = [
             (tr("Variant"), "variant", json!("Default")),
@@ -563,6 +564,7 @@ fn instance_ui(app: &mut FigApp, ui: &mut Ui, doc: &Document, n: &Node) {
         let w = (ui.available_width() - 32.0).max(80.0);
         let resp = widgets::dropdown(ui, &comp_name, w, Some(Icon::Instance)).on_hover_text(tr("Swap instance"));
         menu_popup(&resp).width(w.max(200.0)).show(|ui| {
+            let t = Tokens::get(ui.ctx());
             egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
                 let mut page = None;
                 for (c, name) in comps.iter() {
