@@ -89,7 +89,9 @@ fn turn(shape: &mut Shape, rot: Rot2, angle: f32, pivot: Pos2) {
 
 /// Draw the label of `id` (a top-level frame or a section); the area it covers on screen (its
 /// corners) for hit testing.
-pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: NodeId, selected: bool, hovered: bool) -> Option<[Pos2; 4]> {
+/// `lift`: how far (screen px) the label sits above its usual place (a device body round the frame).
+#[allow(clippy::too_many_arguments)]
+pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: NodeId, selected: bool, hovered: bool, lift: f32) -> Option<[Pos2; 4]> {
     let n = doc.node(id)?;
     let w = doc.world_transform(id);
     let at = |x: f64, y: f64| {
@@ -98,7 +100,7 @@ pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: Nod
     };
     let (p00, p01) = (at(0.0, 0.0), at(0.0, n.height));
     let edge = label_edge(p00, at(n.width, 0.0), p01);
-    let tl = edge.corner;
+    let tl = edge.corner - vec2(0.0, lift.max(0.0));
     let is_comp = matches!(n.kind, NodeKind::Component { .. } | NodeKind::ComponentSet { .. });
     let col = if is_comp {
         COMPONENT

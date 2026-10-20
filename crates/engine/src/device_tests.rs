@@ -199,6 +199,8 @@ fn safe_areas_toggle_is_kept() {
     assert_eq!(s.execute("view.safeAreas", &json!({})).unwrap()["on"], false);
     assert_eq!(s.prefs.view.get("view.safeAreas"), Some(&false));
     assert_eq!(s.execute("view.safeAreas", &json!({"on": true})).unwrap()["on"], true);
+    assert_eq!(s.execute("view.deviceBezels", &json!({})).unwrap()["on"], false);
+    assert_eq!(s.prefs.view.get("view.deviceBezels"), Some(&false));
 }
 
 #[test]

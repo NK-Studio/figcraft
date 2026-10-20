@@ -178,11 +178,12 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
                 ui.close();
             }
         }
-        let toggles: [(&str, &str, bool); 6] = [
+        let toggles: [(&str, &str, bool); 7] = [
             (tr("Pixel grid"), "view.pixelGrid", v.pixel_grid),
             (tr("Snap to pixel grid"), "view.snapPixel", v.snap_pixel),
             (tr("Layout grids"), "view.layoutGrids", v.layout_grids),
             (tr("Safe areas"), "view.safeAreas", v.safe_areas),
+            (tr("Device bezels"), "view.deviceBezels", v.device_bezels),
             (tr("Rulers"), "view.rulers", v.rulers),
             (tr("Outlines"), "view.outlines", v.outlines),
         ];

@@ -934,9 +934,15 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
         if view.safe_areas && n.device.is_some() {
             crate::safe_area::draw(app, painter, t, &doc, *c);
         }
+        let lift = if view.device_bezels && n.device.is_some() {
+            crate::device_bezel::draw(app, painter, &doc, *c);
+            crate::device_bezel::lift(app, &doc, *c)
+        } else {
+            0.0
+        };
         // The focus view's bar names its frame.
         let labelled = focus.is_none() && (n.kind.is_frame_like() || matches!(n.kind, NodeKind::Section { .. }));
-        if labelled && let Some(q) = crate::frame_labels::draw(app, painter, t, &doc, *c, sel.contains(c), ds.hover == Some(*c)) {
+        if labelled && let Some(q) = crate::frame_labels::draw(app, painter, t, &doc, *c, sel.contains(c), ds.hover == Some(*c), lift) {
             labels.push((*c, q.map(|p| app.to_page(p))));
         }
     }

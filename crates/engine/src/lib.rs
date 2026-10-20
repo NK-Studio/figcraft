@@ -188,6 +188,8 @@ pub struct ViewState {
     pub layout_grids: bool,
     /// Device frames show their safe area and cutouts (`view.safeAreas`).
     pub safe_areas: bool,
+    /// Device frames show the device's body round them (`view.deviceBezels`).
+    pub device_bezels: bool,
     pub rulers: bool,
     pub outlines: bool,
     /// Outline mode for the selected layers only (the rest draws normally).
@@ -225,6 +227,7 @@ impl Default for ViewState {
             pixel_grid: true,
             layout_grids: true,
             safe_areas: true,
+            device_bezels: true,
             rulers: false,
             outlines: false,
             outlines_selection: false,

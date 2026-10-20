@@ -19,6 +19,7 @@ pub mod credits;
 pub mod cursors;
 pub mod dev_compare;
 pub mod dev_mode;
+pub mod device_bezel;
 pub mod dialogs;
 pub mod export_panel;
 pub mod field_math;

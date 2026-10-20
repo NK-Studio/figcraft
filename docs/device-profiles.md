@@ -147,6 +147,12 @@ without the profile or Unity installed.
   a rotated frame. Insets stay in points from each edge when a frame is resized to another size;
   cutouts scale with the frame. Every stored number is checked (finite, clamped into the frame,
   at most 64 cutouts) before drawing: a file can say anything.
+- **Device body** (`device_bezel.rs`, View ▸ Device bezels, `view.deviceBezels`, on by default): the
+  phone or tablet drawn round the frame in code, in the presenter's style — a graphite slab with a
+  rim and black glass, side buttons on phones, the screen's real corner radius masking the frame's
+  corners, and the device's cutouts (notch, island, hole punch) in black. It's drawn only outside
+  the screen (and in its corners and cutouts), and the frame's label moves above it. Turned frames
+  have none. No device pictures are used.
 - **Right panel**: the frame type dropdown lists the imported devices under *Devices* (their
   portrait size), then *Clear device* when a selected frame has one, and *Import devices…* (a
   folder picker; the folder is remembered).

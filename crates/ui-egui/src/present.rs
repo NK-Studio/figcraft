@@ -1960,10 +1960,10 @@ pub fn show_pane(app: &mut FigApp, ctx: &egui::Context) {
 }
 
 /// The black glass around a device's screen.
-const GLASS: Color32 = Color32::from_rgb(0x16, 0x16, 0x18);
+pub(crate) const GLASS: Color32 = Color32::from_rgb(0x16, 0x16, 0x18);
 
 /// A device colour lighter (`k` > 0, towards white) or darker (`k` < 0, towards black).
-fn shade([r, g, b]: [u8; 3], k: f32) -> Color32 {
+pub(crate) fn shade([r, g, b]: [u8; 3], k: f32) -> Color32 {
     let k = k.clamp(-1.0, 1.0);
     let f = |c: u8| {
         let c = f32::from(c);
@@ -1973,7 +1973,7 @@ fn shade([r, g, b]: [u8; 3], k: f32) -> Color32 {
 }
 
 /// The width of the coloured band round a device's glass (upright screen width `w`, bezel `b`).
-fn rim(w: f32, b: f32) -> f32 {
+pub(crate) fn rim(w: f32, b: f32) -> f32 {
     (w * 0.016).clamp(1.5, (b * 0.5).max(1.5))
 }
 
@@ -2054,7 +2054,7 @@ fn device_glass(p: &egui::Painter, device: &str, s: Rect, landscape: bool) {
 
 /// Fill what lies between each corner of `s` and its rounding of radius `r` (fans of triangles
 /// from the corner to the arc).
-fn corner_masks(s: Rect, r: f32, color: Color32) -> egui::Shape {
+pub(crate) fn corner_masks(s: Rect, r: f32, color: Color32) -> egui::Shape {
     const SEGMENTS: usize = 12;
     if !(r.is_finite() && r > 0.0) {
         return egui::Shape::Noop;
