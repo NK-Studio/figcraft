@@ -117,6 +117,9 @@ pub fn infer_scale(platform: Platform, w: f64, h: f64, dpi: Option<f64>) -> (f64
             } else if short == 1080.0 && long == 1920.0 {
                 // The "Plus" panels: a 414 × 736 pt layout drawn at 3x and scaled down.
                 1080.0 / 414.0
+            } else if short == 1080.0 && (2338.0..=2340.0).contains(&long) {
+                // The "mini" panels: a 375 × 812 pt layout drawn at 3x and scaled down.
+                1080.0 / 375.0
             } else {
                 3.0
             };

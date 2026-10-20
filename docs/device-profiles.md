@@ -62,7 +62,8 @@ import accepts an explicit `scale` override:
 
 - **iOS / iPadOS** (`systemInfo.operatingSystem` starts with `iOS`/`iPadOS`, or the model/name says
   iPhone/iPad/iPod): short side ≥ 1536 px (iPad) → 2; short side ≤ 828 px → 2; the 1080×1920
-  "Plus" panel → 1080/414 (its 414×736 pt layout); otherwise → 3.
+  "Plus" panel → 1080/414 (its 414×736 pt layout); the 1080×2340 "mini" panel → 1080/375 (375×812
+  pt); otherwise → 3.
 - **Android**: `dpi / 160` (dp), when `dpi` is finite and in 80..=1000; otherwise 1.
 - **Anything else**: 1.
 

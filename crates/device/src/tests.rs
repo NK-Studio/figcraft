@@ -89,7 +89,8 @@ fn scale_inference() {
     assert_eq!(ios(750.0, 1334.0), 2.0);
     assert_eq!(ios(828.0, 1792.0), 2.0);
     assert_eq!(ios(1080.0, 1920.0), 1080.0 / 414.0);
-    assert_eq!(ios(1080.0, 2338.0), 3.0);
+    assert_eq!(ios(1080.0, 2338.0), 1080.0 / 375.0, "iPhone 12/13 mini: 375 × 812 pt");
+    assert_eq!(ios(1080.0, 2340.0), 1080.0 / 375.0);
     assert_eq!(ios(1284.0, 2778.0), 3.0);
     assert_eq!(ios(1640.0, 2360.0), 2.0);
     assert_eq!(ios(2048.0, 2732.0), 2.0);
