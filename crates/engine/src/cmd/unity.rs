@@ -8,7 +8,7 @@ use serde_json::{Map, Value, json};
 
 use crate::cmd::CommandSpec;
 use crate::params::{self, get};
-use crate::{Result, Session, bad, spec};
+use crate::{Result, Session, bad, file_access, spec};
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -33,6 +33,13 @@ pub fn specs() -> Vec<CommandSpec> {
             "{id} → {position (root | relative | absolute), inAutoLayout, pivot {x, y} (0–1), pivotSet, anchorH, anchorV}",
             false,
             unity_layer
+        ),
+        spec!(
+            "file.exportUitk",
+            "Export to Unity UI Toolkit",
+            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity scripts into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write FigcraftPanelScale.cs and FigcraftSafeArea.cs, default true)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
+            false,
+            file_export_uitk
         ),
         spec!(
             "unity.layer.set",
@@ -174,4 +181,115 @@ fn unity_layer_set(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     Ok(json!({"ids": ids.iter().map(|i: &NodeId| json!(i)).collect::<Vec<_>>()}))
+}
+
+/// The frames to export: `ids` (each one's top-level frame), else the selection's, else every
+/// top-level frame on the page.
+fn export_frames(s: &Session, p: &Value) -> Result<Vec<NodeId>> {
+    let doc = s.doc()?;
+    let mut picked = params::targets(s, p);
+    if picked.is_empty() {
+        let page = s.page()?;
+        let mut out = Vec::new();
+        let mut stack: Vec<NodeId> = doc.node(page).map(|n| n.children.clone()).unwrap_or_default();
+        stack.reverse();
+        while let Some(id) = stack.pop() {
+            let Some(n) = doc.node(id) else { continue };
+            match n.kind {
+                figcraft_doc::NodeKind::Section { .. } => stack.extend(n.children.iter().rev()),
+                _ if n.kind.is_frame_like() => out.push(id),
+                _ => {}
+            }
+        }
+        return Ok(out);
+    }
+    picked = picked.into_iter().filter_map(|i| doc.top_level_frame(i)).collect();
+    let mut seen = std::collections::HashSet::new();
+    picked.retain(|i| seen.insert(*i) && doc.node(*i).is_some_and(|n| n.kind.is_frame_like()));
+    Ok(picked)
+}
+
+fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "file.exportUitk";
+    let mut opts = figcraft_uitk::file_options(s.doc()?);
+    if let Some(v) = get(p, "version") {
+        opts.version = version_of(CMD, v)?;
+    }
+    if let Some(g) = params::boolean(p, "grid") {
+        opts.grid_enabled = g;
+    }
+    let scale = match get(p, "scale") {
+        None => 2.0,
+        Some(v) => params::f64_of(v).filter(|k| (0.5..=8.0).contains(k)).ok_or_else(|| bad(CMD, "`scale` must be from 0.5 to 8"))?,
+    };
+    let scripts = params::boolean(p, "scripts").unwrap_or(true);
+    let dir = match get(p, "dir") {
+        None => None,
+        Some(Value::String(d)) if !d.trim().is_empty() => Some(std::path::PathBuf::from(d)),
+        Some(_) => return Err(bad(CMD, "`dir` must be a folder path")),
+    };
+    let frames = export_frames(s, p)?;
+    if frames.is_empty() {
+        return Err(bad(CMD, "no top-level frames to export (select one, or pass `ids`)"));
+    }
+    let doc = s.doc()?;
+    let ex = figcraft_uitk::export(doc, &frames, opts);
+    let count = |sev: Severity| ex.issues.iter().filter(|i| i.severity == sev).count();
+    let counts = json!({"error": count(Severity::Error), "warning": count(Severity::Warning), "info": count(Severity::Info)});
+    let documents: Vec<Value> = ex
+        .documents
+        .iter()
+        .map(|d| {
+            let mut v = json!({"frame": d.frame, "name": d.name, "stem": d.stem, "width": d.width, "height": d.height, "safeArea": d.safe_area});
+            if dir.is_none() {
+                v["uxml"] = json!(d.uxml);
+                v["uss"] = json!(d.uss);
+            }
+            v
+        })
+        .collect();
+    let Some(dir) = dir else {
+        return Ok(
+            json!({"version": opts.version, "documents": documents, "bakes": ex.bakes, "images": ex.images, "counts": counts, "issues": ex.issues}),
+        );
+    };
+    // Render the baked layers first: nothing is written when one can't be drawn.
+    let mut pngs = Vec::new();
+    for b in &ex.bakes {
+        let pix = figcraft_render::render_area(doc, &[b.id], b.area, scale)
+            .ok_or_else(|| bad(CMD, format!("{} is too large to bake at scale {scale}", b.id)))?;
+        let png = figcraft_render::encode_png(&pix).map_err(|e| bad(CMD, e))?;
+        pngs.push((b.file.clone(), png));
+    }
+    let mut files = Vec::new();
+    let mut put = |rel: &str, bytes: &[u8]| -> Result<()> {
+        let path = dir.join(rel);
+        if let Some(parent) = path.parent() {
+            file_access::create_dir_all(parent)?;
+        }
+        file_access::write(&path, bytes)?;
+        files.push(path.to_string_lossy().into_owned());
+        Ok(())
+    };
+    for d in &ex.documents {
+        put(&format!("{}.uxml", d.stem), d.uxml.as_bytes())?;
+        put(&format!("{}.uss", d.stem), d.uss.as_bytes())?;
+    }
+    for (file, png) in &pngs {
+        put(file, png)?;
+    }
+    for img in &ex.images {
+        if let Some(data) = doc.images.get(&img.hash) {
+            put(&img.file, &data.bytes)?;
+        }
+    }
+    if scripts {
+        for (name, code) in [figcraft_uitk::scripts::PANEL_SCALE, figcraft_uitk::scripts::SAFE_AREA] {
+            put(name, code.as_bytes())?;
+        }
+    }
+    s.message = Some(format!("Exported {} frames for Unity {}", ex.documents.len(), opts.version));
+    Ok(
+        json!({"version": opts.version, "documents": documents, "files": files, "bakes": ex.bakes, "images": ex.images, "counts": counts, "issues": ex.issues}),
+    )
 }

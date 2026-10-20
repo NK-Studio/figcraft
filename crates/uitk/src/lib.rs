@@ -3,11 +3,16 @@
 //! layer, what the target version's UXML/USS can't represent exactly.
 
 mod check;
+mod export;
+#[cfg(test)]
+mod export_tests;
 mod layer;
+pub mod scripts;
 #[cfg(test)]
 mod tests;
 
 pub use check::{CheckOptions, Issue, Severity, check};
+pub use export::{Bake, Export, ImageFile, UitkDocument, export};
 pub use layer::{LayerInfo, Position, file_options, implied_pivot, layer_info};
 
 use serde::{Serialize, Serializer};

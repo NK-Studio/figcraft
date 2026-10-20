@@ -22,7 +22,7 @@ replaced.
 | L2 | `figcraft-collab` | ~3.4k | Real-time collaboration core (no networking): synced object/property model, change sets, fractional positions, server ordering and validation, client reconciliation, wire messages |
 | L2 | `figcraft-plugin` | ~1.0k | Plugin manifest and the WebAssembly sandbox (wasmi, metered, memory cap, no file system, network or clock) |
 | L2 | `figcraft-device` | ~0.7k | Device profiles: screen sizes, scale, safe areas and cutouts per orientation; Unity `.device` and `figcraft-device` readers (`docs/device-profiles.md`) |
-| L2 | `figcraft-uitk` | ~0.5k | Unity UI Toolkit: target versions and the compatibility check against UXML/USS (`docs/unity-uitk.md`) |
+| L2 | `figcraft-uitk` | ~1.5k | Unity UI Toolkit: target versions, the compatibility check, layer placement and the UXML/USS export (`docs/unity-uitk.md`) |
 | L2 | `figcraft-pathops` | ~1.1k | Booleans (linesweeper), outline stroke with alignment, arrowheads |
 | L3 | `figcraft-render` | ~5.4k | Scene → pixels on tiny-skia (CPU): isolated layers for opacity/blend/effects, clips, masks, shadows, blurs (uniform, progressive, background), noise, texture, glass, text; banded in parallel; retained rendering of only what changed; levels of detail when zoomed out |
 | L3 | `figcraft-format` | ~5.2k | Native `.figcraft` (zip of `document.json` + images; streamed JSON), local library files, versions, REST API file JSON import (`rest/`) |

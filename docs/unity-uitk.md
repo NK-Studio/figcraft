@@ -1,7 +1,8 @@
 # Unity UI Toolkit: structure mapping, compatibility and sync
 
 > **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`); U2 landed (file
-> settings, layer position and pivot, the right panel's Unity section). U3–U5 planned.
+> settings, layer position and pivot, the right panel's Unity section); U3 landed (UXML/USS
+> export, version-aware conversions, SafeArea container, Unity scripts). U4–U5 planned.
 > **Owner area:** `crates/uitk` (L2), `UnitySettings` / `Pivot` in `crates/doc` (L1),
 > `crates/engine/src/cmd/unity.rs` (L5), `crates/ui-egui/src/unity_panel.rs` (L6).
 > **Related:** [`device-profiles.md`](device-profiles.md) (devices, safe areas, device frames).
@@ -174,15 +175,77 @@ Relative/Absolute switch inside auto layout), for absolute layers the 9-point pi
 pivot as numbers, whether it comes from the constraints or the layer, Reset), and the selection's
 counts and issues; clicking an issue selects its layer. Results are cached per document revision.
 
+## Export (U3)
+
+`file.exportUitk {ids?, dir?, version?, grid?, scale?, scripts?}` exports top-level frames (the
+given ones' top-level frames, else the selection's, else every one on the page; frames in
+sections count). Without `dir` it returns the UXML and USS as text (agents, tests); with `dir` it
+writes, and the Design tab's Unity section has *Export to Unity…* (a folder picker):
+
+```
+<dir>/<Frame>.uxml          one per frame (the name made file-safe and unique)
+<dir>/<Frame>.uss           one rule per layer: .fc-<layer id> { … }
+<dir>/images/<hash>.<ext>   image fills, as stored
+<dir>/images/baked-<id>.png layers the target version can't draw (rendered at `scale`, 2 by default)
+<dir>/FigcraftPanelScale.cs
+<dir>/FigcraftSafeArea.cs
+```
+
+**Elements.** Frames, groups, rectangles → `ui:VisualElement`; text → `ui:Label` (its text in
+`text`, the line height as a `<line-height>` rich text tag); vector shapes and booleans → a
+`VisualElement` with their baked PNG as `background-image`. `name` is the layer name; hidden layers
+are `display: none`; locked ones `picking-mode="Ignore"`. The root fills the panel
+(`position: absolute; left/top/right/bottom: 0`).
+
+**Placement.**
+- *Absolute* layers (outside auto layout, or ignoring it): `position: absolute`, per axis by
+  constraint — left/top → `left`/`top` px; right/bottom → `right`/`bottom` px; left & right →
+  both (no width); scale → `left` and `width` in %; centre, or any pin with a pivot that isn't its
+  edge → the anchor as `left: 0|50|100%`, the pivot as `translate: -p%`, the rest a `margin-left`
+  (same for the vertical axis). Offsets are measured inside the parent's border (UITK places
+  absolute children in the padding box). Rotation → `rotate` about the centre, the box placed by
+  its unrotated position.
+- *Relative* layers (in auto layout): fixed → size + `flex-shrink: 0`; hug → no size; fill on the
+  main axis → `flex-grow: 1; flex-basis: 0`; fill across → `align-self: stretch`; min/max sizes.
+- *Auto layout frames*: `flex-direction`, `justify-content`, `align-items`, `flex-wrap` +
+  `align-content`, padding (minus the border when strokes aren't included in the layout).
+
+**By version.**
+
+| Design | Before | From |
+|---|---|---|
+| Gap | `margin-left`/`margin-top` on every flow child after the first | 6.7: `gap` (`row-gap`/`column-gap` when wrapping) |
+| "First on top" | children reversed + `row-reverse`/`column-reverse` (start/end swapped) | 6.7: `z-index` |
+| Linear/radial gradient | leaf: baked; container: its first stop as the colour | 6.7: `linear-gradient()` / `radial-gradient()` |
+| Drop shadow | leaf: baked, drawn by an overlay child where the PNG reaches past the box | 6.6: `filter: drop-shadow()` |
+| Layer blur | leaf: baked | 6.3: `filter: blur(r/2)` |
+| Background blur | — | 6.6: `backdrop-filter: blur(r/2)` |
+| Vectors, inner shadows, noise/texture/glass, dashed or non-solid strokes, crop/tile/pattern fills, several fills | baked (leaf layers) | — |
+
+**SafeArea.** A device frame's export has a `SafeArea` element (`figcraft-safe-area`) placed on
+the frame's safe area. Layers that fit inside it go in it, with coordinates from its top-left;
+layers reaching into the unsafe bands (backgrounds) stay on the root. With an auto layout frame,
+the container is the flex container, with the frame's padding less the insets. At run time
+`FigcraftSafeArea` moves every container onto `Screen.safeArea`.
+
+**In Unity.** Copy the folder into `Assets/`, show `<Frame>.uxml` in a `UIDocument`, and add
+`FigcraftPanelScale` (set `designWidth` to the frame's portrait width in points; it switches the
+PanelSettings to Constant Pixel Size with `scale = short screen side / designWidth`) and
+`FigcraftSafeArea` next to it. Fonts are the project's: each label carries `--fc-font-family` and
+`--fc-font-style` for a project style sheet to map to font assets.
+
+**Known limits (checked in U4):** whether Unity accepts `gap` on flex containers in 6.7 without the
+grid flag; absolute children in the padding box; the blur radius halving; gradient angles on
+non-square boxes; grid auto layout is exported as a wrapping row; rotated baked layers; mixed text
+styles aren't carried (one style per label).
+
 ## Phases
 
 - **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),
   `unity.check`.
 - **U2 — Unity data on layers** (landed): see [Unity data in the file](#unity-data-in-the-file-u2).
-- **U3 — UXML/USS export**: `file.exportUitk` writing UXML + USS per frame, version-aware
-  conversions (gap → margins, gradients/shadows → baked images before their version), the SafeArea
-  container, and the panel-scale rule; the Unity-side runtime pieces (SafeArea element, panel scale)
-  as a separate Unity package (C#), not in this repo.
+- **U3 — UXML/USS export** (landed): see [Export](#export-u3). The Unity-side scripts ship as
+  generated text with each export (`crates/uitk/src/scripts.rs`).
 - **U4 — Unity comparison harness** (local, `plan/`): through the Unity MCP/CLI, load the export in
   the Device Simulator for each device and orientation and for several Unity versions (6.0, 6.3,
   6.7), dump every element's `worldBound`, and diff against FigCraft's rectangles (exact px target).

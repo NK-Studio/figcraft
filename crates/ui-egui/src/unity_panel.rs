@@ -45,6 +45,27 @@ pub fn file_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     }
     let Ok(page) = app.session.page() else { return };
     issues(app, ui, doc, &[page]);
+    export_button(app, ui, None);
+}
+
+/// Export to a folder: `ids` (the selection's top-level frames), or every top-level frame.
+fn export_button(app: &mut FigApp, ui: &mut Ui, ids: Option<&[NodeId]>) {
+    let mut clicked = false;
+    row(ui, 36.0, |ui| clicked = widgets::button(ui, tr("Export to Unity…"), false, true).clicked());
+    if !clicked {
+        return;
+    }
+    let ids = ids.map(<[NodeId]>::to_vec);
+    app.pick_folder(tr("Export to Unity…"), move |app, dir| {
+        let mut p = json!({"dir": dir.to_string_lossy()});
+        if let Some(ids) = &ids {
+            p["ids"] = json!(ids);
+        }
+        if let Some(r) = app.run("file.exportUitk", p) {
+            let n = r["documents"].as_array().map_or(0, Vec::len);
+            app.toast(trf("Exported {n} frames for Unity", &[("n", &n)]));
+        }
+    });
 }
 
 /// With layers selected: position, pivot and the selection's issues.
@@ -83,6 +104,7 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
         pivot_row(app, ui, sel, info.pivot, info.pivot_set);
     }
     issues(app, ui, doc, sel);
+    export_button(app, ui, Some(sel));
 }
 
 /// The 9-point pivot picker, the pivot as numbers, and Reset when the layer sets its own.

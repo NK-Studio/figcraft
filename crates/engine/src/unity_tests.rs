@@ -110,3 +110,50 @@ fn layer_position_and_pivot() {
     let c = s.execute("unity.check", &json!({"ids": [child]})).unwrap();
     assert!(c["issues"].as_array().unwrap().iter().any(|i| i["rule"] == "pivot"), "{c}");
 }
+
+#[test]
+fn export_returns_text_or_writes_a_folder() {
+    let mut s = Session::new();
+    let f = frame_with_gap(&mut s);
+    s.execute("shape.ellipse", &json!({"x": 10, "y": 10, "width": 20, "height": 20, "parent": f})).unwrap();
+    s.execute("select.none", &json!({})).unwrap();
+    // No folder: the text comes back (every top-level frame on the page).
+    let r = s.execute("file.exportUitk", &json!({})).unwrap();
+    assert_eq!(r["version"], "6.0");
+    let d = &r["documents"][0];
+    assert_eq!(d["frame"], json!(f));
+    assert!(d["uxml"].as_str().unwrap().contains("<ui:UXML"));
+    assert!(d["uss"].as_str().unwrap().contains(&format!(".fc-{f} {{")));
+    assert_eq!(r["bakes"].as_array().unwrap().len(), 1, "the ellipse");
+    // A folder: files, the baked PNG and the scripts.
+    let dir = std::env::temp_dir().join(format!("figcraft-uitk-export-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    let r = s.execute("file.exportUitk", &json!({"dir": dir.to_string_lossy(), "version": "6.3"})).unwrap();
+    let files: Vec<String> = r["files"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
+    let stem = r["documents"][0]["stem"].as_str().unwrap().to_string();
+    for want in [format!("{stem}.uxml"), format!("{stem}.uss"), "FigcraftPanelScale.cs".into(), "FigcraftSafeArea.cs".into()] {
+        assert!(dir.join(&want).is_file(), "{want} in {files:?}");
+    }
+    let png = std::fs::read(dir.join(r["bakes"][0]["file"].as_str().unwrap())).unwrap();
+    assert!(png.starts_with(b"\x89PNG"));
+    assert!(r["documents"][0].get("uxml").is_none());
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(s.execute("file.exportUitk", &json!({"dir": 5})).is_err());
+    assert!(s.execute("file.exportUitk", &json!({"scale": 100})).is_err());
+}
+
+#[test]
+fn export_picks_the_selections_top_level_frames() {
+    let mut s = Session::new();
+    let a = frame_with_gap(&mut s);
+    let b = s.execute("frame.create", &json!({"x": 500, "y": 0, "width": 100, "height": 100})).unwrap()["id"].as_u64().unwrap();
+    let inner = s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10, "parent": b})).unwrap()["id"].as_u64().unwrap();
+    s.execute("select.set", &json!({"ids": [inner]})).unwrap();
+    let r = s.execute("file.exportUitk", &json!({})).unwrap();
+    let frames: Vec<u64> = r["documents"].as_array().unwrap().iter().map(|d| d["frame"].as_u64().unwrap()).collect();
+    assert_eq!(frames, vec![b]);
+    let r = s.execute("file.exportUitk", &json!({"ids": [a, b, a]})).unwrap();
+    assert_eq!(r["documents"].as_array().unwrap().len(), 2);
+    let mut empty = Session::new();
+    assert!(empty.execute("file.exportUitk", &json!({})).is_err());
+}
