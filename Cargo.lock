@@ -1539,6 +1539,7 @@ dependencies = [
  "figcraft-render",
  "figcraft-svg",
  "figcraft-text",
+ "figcraft-uitk",
  "image",
  "log",
  "regex",
@@ -1730,6 +1731,15 @@ dependencies = [
  "toml",
  "wat",
  "web-time",
+]
+
+[[package]]
+name = "figcraft-uitk"
+version = "0.7.0"
+dependencies = [
+ "figcraft-doc",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

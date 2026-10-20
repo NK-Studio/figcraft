@@ -1,0 +1,185 @@
+# Unity UI Toolkit: structure mapping, compatibility and sync
+
+> **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`). U2–U5 planned.
+> **Owner area:** `crates/uitk` (L2), `crates/engine/src/cmd/unity.rs` (L5).
+> **Related:** [`device-profiles.md`](device-profiles.md) (devices, safe areas, device frames).
+
+## Goal
+
+A screen laid out in FigCraft for each device (device frames, safe areas: `device-profiles.md`)
+must behave **the same** once taken to Unity UI Toolkit (UITK): every element at the same place and
+size, in points, on every device and orientation. The end goal is a "sync to Unity" feature; this
+doc fixes the model it rests on:
+
+1. which FigCraft structures map to which UXML/USS, per Unity version;
+2. what can't be represented (checked and reported per layer before anything is exported);
+3. the coordinate, scale and safe-area rules both sides follow;
+4. how "the same" is measured (a harness that runs the export in Unity and compares rectangles).
+
+**Supported Unity versions: 6.0 and later.** Every rule below is keyed by the target version.
+
+## UITK features by version
+
+From Unity's manuals and release posts (see Sources). 6.7 was in beta when this was written; the
+table is rechecked when it ships.
+
+| Feature | Unity | Notes |
+|---|---|---|
+| Flexbox (Yoga), `position: absolute`, `left/top/right/bottom`, `%` units, border-box sizing | 6.0 | default `flex-direction: column`, `flex-shrink: 1`, `align-items: stretch` |
+| `translate` in `%` of the element's own size, `transform-origin` (default centre) | 6.0 | transforms don't change other elements' layout |
+| `overflow: hidden` (rounded clipping), `border-*-radius` (clamped to half the size) | 6.0 | no elliptical radii |
+| World-space UI | 6.2 | not used here |
+| `filter` (blur, grayscale, tint, …) | 6.3 | |
+| `aspect-ratio` | 6.3 | |
+| SVG as a core module (Vector Images), `Image` in UXML | 6.3 | before: the Vector Graphics package |
+| UI Shader Graph (URP) | 6.3 | escape hatch for effects |
+| `-unity-text-auto-size` | 6.3 (roadmap post; unconfirmed) | |
+| `PanelRenderer` replaces `UIDocument` | 6.5 | the Unity-side setup differs |
+| `filter: drop-shadow()` | 6.6 | follows the element's silhouette; **no spread** (not CSS `box-shadow`) |
+| `backdrop-filter` | 6.6 | background blur |
+| `gap` between flex children | 6.7 | the 6.7 manual lists `row-gap`/`column-gap` only under grid: **to confirm in U4** |
+| `linear-gradient()`, `radial-gradient()` on `background-image` | 6.7 | no angular/diamond |
+| `z-index` | 6.7 | |
+| CSS Grid (`display: grid`, `grid-template-*`, `row-gap`, `column-gap`) | 6.7, **experimental** (Project Settings ▸ UI Toolkit ▸ Enable Grid Layout) | no named lines, areas, subgrid |
+| `box-shadow`, soft masks, media queries, `vh`/`vw` | not up to 6.7 | |
+
+## Coordinates, units and scale
+
+- Both sides measure from the **top-left**, y down. UITK uses border-box sizing, like FigCraft
+  frames with strokes inside.
+- **1 UITK px = 1 FigCraft point = 1 device point.** A FigCraft device frame is the device screen in
+  points; in Unity the panel's scale is set so the panel is the same size in its own px:
+  `panelSettings.scale = Screen.width / frameWidthPt` (equivalently, the device scale factor). The
+  Scale With Screen Size / reference resolution modes don't give per-device equality and aren't the
+  sync target (they can still be used for other UI).
+- **Safe area:** UITK doesn't apply it. The export wraps the content of a device frame in a
+  *SafeArea container* whose padding is `Screen.safeArea` converted to panel coordinates
+  (`RuntimePanelUtils.ScreenToPanel`), which is exactly what FigCraft draws on device frames.
+  Layers that stand outside it in FigCraft (backgrounds that bleed under the status bar) stay
+  outside it in the export.
+
+## Structure mapping
+
+| FigCraft (Figma model) | UITK | Version |
+|---|---|---|
+| Frame / group / component / instance | `VisualElement` (instances later as UXML templates) | 6.0 |
+| Auto layout horizontal / vertical | `flex-direction: row / column` | 6.0 |
+| Wrap | `flex-wrap: wrap` (+ `align-content`) | 6.0 |
+| Main align min / centre / max / space-between / around / evenly | `justify-content` | 6.0 (`space-evenly`: to confirm in U4) |
+| Cross align min / centre / max | `align-items` | 6.0 |
+| Cross align **baseline** | — | ✗ |
+| Padding | `padding-*` | 6.0 |
+| Gap (and cross gap when wrapping) | 6.7+: `gap`; earlier: margins on the children | see table |
+| Hug / Fill / Fixed | `auto` / `flex-grow: 1; flex-basis: 0` / `width`/`height` + `flex-shrink: 0` | 6.0 |
+| Min / max sizes | `min-*` / `max-*` | 6.0 |
+| Absolute child in auto layout | `position: absolute` | 6.0 |
+| Grid auto layout | 6.7 with the experimental flag: `display: grid`; earlier ✗ | |
+| Constraints left / right / left & right | `left` / `right` / both (stretch) | 6.0 |
+| Constraints centre | `left: 50%` + `translate: -50%` + offset (the pivot rule below) | 6.0 |
+| Constraints scale | `left` and `width` in `%` | 6.0 |
+| Clip content | `overflow: hidden` | 6.0 |
+| Solid fill | `background-color` | 6.0 |
+| Image fill fill / fit | `background-image` + `-unity-background-scale-mode` scale-and-crop / scale-to-fit | 6.0 |
+| Linear / radial gradient | `background-image: linear-/radial-gradient()`; earlier: baked image | 6.7 |
+| Inside stroke (per side too) | `border-*-width` + `border-*-color` | 6.0 |
+| Corner radii | `border-*-radius` | 6.0 |
+| Opacity | `opacity` | 6.0 |
+| Rotation | `rotate` about `transform-origin` | 6.0 |
+| Drop shadow | `filter: drop-shadow()`; earlier: baked image | 6.6 |
+| Layer blur | `filter: blur()` | 6.3 |
+| Background blur | `backdrop-filter: blur()` | 6.6 |
+| Text | `Label` + `font-size`, `-unity-font-definition`, `color`, `letter-spacing`, `-unity-text-align`, `white-space`, `text-overflow` | 6.0 |
+| Vector shapes, booleans | Vector Image (SVG); earlier: baked image | 6.3 |
+
+### Pivot (absolute layers)
+
+UITK has no pivot property; a pivot is a combination that works from 6.0:
+
+- the **anchor** is where in the parent the layer is attached: `left`/`top` in `%` (0%, 50%, 100%)
+  or `right`/`bottom`;
+- the **pivot** is which point of the layer sits on the anchor: `translate: -px% -py%`;
+- the offset is added in px (`margin-left`/`margin-top`, or folded into `left`/`top` with `calc`-free
+  arithmetic since USS has no `calc`).
+
+FigCraft's constraints give the anchor; U2 adds a per-layer **pivot (0–1, 0–1)** used for absolute
+layers (default: the corner the constraint implies), edited with a 9-point picker like Unity's
+anchor presets. `transform-origin` stays the rotation/scale origin and is separate.
+
+## Compatibility check (U1)
+
+`unity.check {ids?, version? ("6.0"…), grid?}` walks the given layers (default: the selection, else
+the current page) and reports, per layer, what the target version can't represent exactly:
+
+- **error**: can't be represented (the export will drop or flatten it);
+- **warning**: approximated or baked into an image (looks right, but isn't live UITK);
+- **info**: converted to an equivalent construct (behaves the same).
+
+| Rule | Error | Warning | Info |
+|---|---|---|---|
+| `grid-layout` | grid auto layout before 6.7, or 6.7+ without `grid: true` | — | 6.7+ with `grid: true` (experimental flag) |
+| `gap` | — | gap with wrap before 6.7 (margins plus a negative container margin) | gap before 6.7 (margins) |
+| `baseline-align` | cross align baseline | — | — |
+| `strokes-in-layout` | — | auto layout with strokes not included and a stroke (UITK borders always take space) | — |
+| `stroke-align` | — | centre/outside strokes (UITK borders are inside) | — |
+| `stroke-style` | dashed strokes, variable width, brushes | — | — |
+| `stroke-paint` | — | gradient/image strokes (borders are one colour; baked) | — |
+| `fill-count` | — | more than one visible fill (one colour + one image) | — |
+| `gradient` | — | linear/radial before 6.7, angular/diamond always (baked) | — |
+| `image-mode` | — | crop/tile image fills | — |
+| `blend` | — | non-normal blend modes on layers, fills or effects | — |
+| `corner-smoothing` | — | smoothing > 0 | — |
+| `drop-shadow` | — | before 6.6 (baked); 6.6+ with spread ≠ 0 or "show behind" | — |
+| `inner-shadow` | inner shadows | — | — |
+| `layer-blur` | — | before 6.3 | — |
+| `background-blur` | — | before 6.6 | — |
+| `effect-other` | noise, texture, glass | — | — |
+| `mask` | masks other than clip content | — | — |
+| `vector` | — | vector shapes/booleans before 6.3 (baked) | 6.3+ (Vector Image); their strokes and fills are inside the image |
+| `text-line-height` | — | a line height other than auto (USS has none; `<line-height>` rich text) | — |
+| `text-features` | — | lists, paragraph indents, decoration styles (thickness, offset, colour) | — |
+| `text-runs` | — | — | mixed styles (rich text tags) |
+| `text-fill` | — | gradient/image text fills (text colour is solid; baked) | — |
+| `z-order` | — | — | "first on top" stacking: before 6.7 children reversed with a `*-reverse` direction; 6.7+ `z-index` |
+
+Rules marked "to confirm" in the tables above are rechecked by the U4 harness and the table is
+updated with what Unity actually does.
+
+## Phases
+
+- **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),
+  `unity.check`.
+- **U2 — Unity data on layers**: target version per file, per-layer pivot and position mode, a
+  Unity section in the right panel (9-point pivot/anchor picker, the check's results on the
+  selection).
+- **U3 — UXML/USS export**: `file.exportUitk` writing UXML + USS per frame, version-aware
+  conversions (gap → margins, gradients/shadows → baked images before their version), the SafeArea
+  container, and the panel-scale rule; the Unity-side runtime pieces (SafeArea element, panel scale)
+  as a separate Unity package (C#), not in this repo.
+- **U4 — Unity comparison harness** (local, `plan/`): through the Unity MCP/CLI, load the export in
+  the Device Simulator for each device and orientation and for several Unity versions (6.0, 6.3,
+  6.7), dump every element's `worldBound`, and diff against FigCraft's rectangles (exact px target).
+- **U5 — flexbox-compatible layout, if U4 shows gaps**: frames in "UITK mode" laid out with Yoga's
+  rules (e.g. the MIT `taffy` crate configured with UITK's defaults) so FigCraft's preview matches
+  Unity where Figma's and Yoga's rules differ (shrinking, overflow). Only when measured differences
+  can't be closed in the export.
+- **Then: sync** — the export repeated on change into a Unity project.
+
+## Open questions
+
+- Does `gap` work on flex containers in 6.7 without the grid flag (the manual and the release post
+  disagree)?
+- `justify-content: space-evenly` support in each version.
+- Text: TextCore/ATG metrics against FigCraft's (hug sizes of text are the most likely source of
+  differences); line height.
+- Where Figma and Yoga resolve the same structure differently (fill children that overflow,
+  `flex-shrink: 1` by default, min sizes) — measured in U4.
+
+## Sources
+
+- [USS common properties (6000.7)](https://docs.unity.com/en-us/engine/6000.7/manual/uitoolkits/uielements/uie-uss/properties/supported-properties)
+- [State of UI Toolkit in Unity 6.7](https://discussions.unity.com/t/state-of-ui-toolkit-in-unity-6-7/1736756)
+- [UI Toolkit development status and next milestones (Nov 2025)](https://discussions.unity.com/t/ui-toolkit-development-status-and-next-milestones-november-2025/1698009)
+- [New in Unity 6.3](https://docs.unity3d.com/6000.3/Documentation/Manual/WhatsNewUnity63.html),
+  [6.4](https://docs.unity3d.com/6000.6/Documentation/Manual/WhatsNewUnity64.html),
+  [6.6](https://docs.unity3d.com/6000.6/Documentation/Manual/WhatsNewUnity66.html)
+- [USS transform (6000.0)](https://docs.unity3d.com/6000.0/Documentation/Manual/UIE-Transform.html)

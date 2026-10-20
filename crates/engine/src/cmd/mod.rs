@@ -19,6 +19,7 @@ pub mod section;
 pub mod structure;
 pub mod styles;
 pub mod text;
+pub mod unity;
 pub mod variables;
 pub mod variables_io;
 pub mod view;
@@ -91,6 +92,7 @@ fn registry() -> &'static Registry {
         list.extend(proto::specs());
         list.extend(proto_actions::specs());
         list.extend(device::specs());
+        list.extend(unity::specs());
         list.extend(comment::specs());
         list.extend(crate::vectoredit::specs());
         list.extend(crate::shapebuilder::specs());

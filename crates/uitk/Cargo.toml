@@ -1,0 +1,14 @@
+[package]
+name = "figcraft-uitk"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "FigCraft and Unity UI Toolkit: target versions and the compatibility check of a design against what UXML/USS can represent (see docs/unity-uitk.md)"
+
+[lints]
+workspace = true
+
+[dependencies]
+figcraft-doc = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
