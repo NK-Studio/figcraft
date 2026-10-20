@@ -1,6 +1,7 @@
 //! Project tasks: `cargo xtask <task>`.
 //!
-//! - `ci`      fmt check, clippy -D warnings, tests, layers, assets, wasm check
+//! - `ci`      fmt check, clippy -D warnings, tests, layers, assets (this fork targets neither the
+//!   browser nor Linux, so the wasm check is left out; run `wasm` on its own when wanted)
 //! - `layers`  crate dependency layering check
 //! - `assets`  every file under assets/ and docs/ has a row in ATTRIBUTION.md
 //! - `parity`  menu-catalog coverage → docs/parity-checklist.md
@@ -58,7 +59,6 @@ fn ci() -> bool {
         && run(cargo().args(["test", "--workspace"]))
         && layers::check(&root())
         && assets()
-        && wasm()
 }
 
 fn wasm() -> bool {

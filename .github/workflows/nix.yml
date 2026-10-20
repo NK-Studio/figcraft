@@ -2,12 +2,8 @@
 # when Cargo.lock gains something nix/package.nix can't vendor, and nothing else would notice.
 name: Nix
 
+# This fork doesn't target Linux: run by hand only.
 on:
-  push:
-    branches: [main]
-    paths: ["flake.nix", "flake.lock", "nix/**", "Cargo.lock", ".github/workflows/nix.yml"]
-  pull_request:
-    paths: ["flake.nix", "flake.lock", "nix/**", "Cargo.lock", ".github/workflows/nix.yml"]
   workflow_dispatch:
 
 permissions:

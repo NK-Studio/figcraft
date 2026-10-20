@@ -1,5 +1,5 @@
-# CI for pull requests and main: format, clippy, tests, dependency layering, asset attribution and
-# the wasm32 check (the same gates as `cargo xtask ci`). Linux only: macOS is built and tested only
+# CI for pull requests and main: format, clippy, tests, dependency layering and asset attribution
+# (the same gates as `cargo xtask ci`; this fork doesn't target the browser, so no wasm32 check). Linux only: macOS is built and tested only
 # by release.yml (the org's macOS runners are kept for releases; craftrules release/playbook.md),
 # and Windows/FreeBSD packaging have their own workflows.
 name: CI
@@ -69,20 +69,3 @@ jobs:
       - name: Asset attribution
         run: cargo run --locked -q -p xtask -- assets
 
-  wasm:
-    timeout-minutes: 30
-    name: wasm32 check
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
-      - uses: Swatinem/rust-cache@v2
-        with:
-          key: wasm32
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-          cache-on-failure: true
-      # The engine, the UI crate and apps/figcraft-web must keep compiling for the browser.
-      - name: Check wasm-safe crates
-        run: cargo run --locked -q -p xtask -- wasm

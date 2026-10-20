@@ -81,10 +81,13 @@ code.
   L6 depends on egui/eframe/rfd/winit. **The UI crate is swappable.**
 - **The UI is thin**: panels read engine state and act through `app.run(id, params)` /
   `app.set_props(ids, props)`. Colours come from `theme::Tokens`.
-- **Rust only** (no handwritten JS/TS). **Never break wasm** (`cargo xtask wasm`).
+- **Rust only** (no handwritten JS/TS).
+- **This fork (NK-Studio) targets macOS and Windows only.** Don't design for, test on or add
+  code paths for the browser (wasm) or Linux; leave the existing web/Linux code as it is (no
+  deletions). `cargo xtask wasm` still exists but isn't part of the gate.
 
 ### Quality gates (before every commit)
-`cargo xtask ci` (fmt, clippy -D warnings, tests, layers, assets, wasm). One task per commit with a
+`cargo xtask ci` (fmt, clippy -D warnings, tests, layers, assets). One task per commit with a
 milestone id in the message (`M2.1: auto layout wrap`). Commit after every landed arc of work; push
 to `main`.
 
