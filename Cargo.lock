@@ -1500,6 +1500,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "figcraft-device"
+version = "0.7.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "figcraft-doc"
 version = "0.7.0"
 dependencies = [
@@ -1519,6 +1528,7 @@ dependencies = [
  "craft-docpath",
  "figcraft-collab",
  "figcraft-color",
+ "figcraft-device",
  "figcraft-doc",
  "figcraft-format",
  "figcraft-geom",

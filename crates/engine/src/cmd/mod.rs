@@ -4,6 +4,7 @@ pub mod arrange;
 pub mod comment;
 pub mod component;
 pub mod create;
+pub mod device;
 pub mod edit;
 pub mod file;
 pub mod image;
@@ -89,6 +90,7 @@ fn registry() -> &'static Registry {
         list.extend(library::specs());
         list.extend(proto::specs());
         list.extend(proto_actions::specs());
+        list.extend(device::specs());
         list.extend(comment::specs());
         list.extend(crate::vectoredit::specs());
         list.extend(crate::shapebuilder::specs());

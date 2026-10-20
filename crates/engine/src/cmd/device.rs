@@ -1,0 +1,248 @@
+//! Device profiles (`docs/device-profiles.md`): import Unity Device Simulator `.device` files or
+//! `figcraft-device` files into the session, and query a device's screen size, safe area and
+//! cutouts in pixels and points per orientation. A FigCraft extension (the incumbent has no safe
+//! areas), so these ids are outside the menu catalog. None edits the document.
+
+use std::path::{Path, PathBuf};
+
+use figcraft_device::{DeviceProfile, Insets, Orientation, ParseHint, Platform, PxRect, Screen, native};
+use serde_json::{Value, json};
+
+use crate::cmd::CommandSpec;
+use crate::params::{self, get};
+use crate::{EngineError, Result, Session, bad, file_access, spec};
+
+/// Files a folder import reads at most.
+const MAX_FOLDER_FILES: usize = 512;
+
+pub fn specs() -> Vec<CommandSpec> {
+    vec![
+        spec!(
+            "device.import",
+            "Import Devices",
+            "{path (a Unity `.device` file, a `*.figdevice.json` file, or a folder of them; a Unity package folder's `Editor/Devices` is found) | text (the file's JSON), scale? (pixels per point for every screen, instead of the inferred one), replace? (default true)} → {imported: [id], skipped: [{file, error}]}",
+            false,
+            device_import
+        ),
+        spec!(
+            "device.list",
+            "Devices",
+            "{platform? (\"ios\" | \"android\" | \"other\")} → [{id, name, platform, source, screens: [{widthPx, heightPx, scale, widthPt, heightPt, orientations}]}]",
+            false,
+            device_list
+        ),
+        spec!(
+            "device.get",
+            "Device Safe Area",
+            "{id, orientation? (\"portrait\" | \"portraitUpsideDown\" | \"landscapeLeft\" | \"landscapeRight\" or Unity's 1–4; default the first supported), screen? (index, default 0)} → size, safe area (rect and insets) and cutouts in px and pt, scale, corner radius, overlay",
+            false,
+            device_get
+        ),
+        spec!(
+            "device.export",
+            "Export Device",
+            "{id, path? (a `.json` file to write)} → {id, json} (the profile as `figcraft-device` JSON)",
+            false,
+            device_export
+        ),
+        spec!("device.remove", "Remove Device", "{id} | {all: true} → {removed: n}", false, device_remove),
+    ]
+}
+
+fn device_err(cmd: &str, e: figcraft_device::DeviceError) -> EngineError {
+    bad(cmd, e.to_string())
+}
+
+fn hint_for(path: Option<&Path>, scale: Option<f64>) -> ParseHint {
+    ParseHint {
+        file: path.map(|p| p.to_string_lossy().into_owned()),
+        dir: path.and_then(Path::parent).map(|d| d.to_string_lossy().into_owned()),
+        scale,
+    }
+}
+
+fn is_device_file(p: &Path) -> bool {
+    let name = p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default();
+    name.ends_with(".device") || name.ends_with(native::EXTENSION)
+}
+
+/// The device files in folder `dir`, its `Editor/Devices` and its `Devices` folders, sorted.
+fn folder_files(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut files = Vec::new();
+    for d in [dir.to_path_buf(), dir.join("Editor").join("Devices"), dir.join("Devices")] {
+        if !file_access::is_dir(&d) {
+            continue;
+        }
+        files.extend(file_access::read_dir(&d)?.into_iter().filter(|p| is_device_file(p)));
+    }
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn device_import(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "device.import";
+    let scale = match get(p, "scale") {
+        None => None,
+        Some(v) => Some(params::f64_of(v).filter(|k| (0.1..=10.0).contains(k)).ok_or_else(|| bad(CMD, "`scale` must be a number from 0.1 to 10"))?),
+    };
+    let replace = params::boolean(p, "replace").unwrap_or(true);
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+    if let Some(text) = get(p, "text").and_then(Value::as_str) {
+        let profile = figcraft_device::parse(text.as_bytes(), &hint_for(None, scale)).map_err(|e| device_err(CMD, e))?;
+        imported.push(insert(s, profile, replace)?);
+        return Ok(json!({"imported": imported, "skipped": skipped}));
+    }
+    let Some(path) = get(p, "path").and_then(Value::as_str).filter(|p| !p.trim().is_empty()) else {
+        return Err(bad(CMD, "give `path` (a device file or folder) or `text`"));
+    };
+    let path = PathBuf::from(path);
+    if !file_access::is_dir(&path) {
+        let profile = read_one(&path, scale).map_err(|e| bad(CMD, e))?;
+        imported.push(insert(s, profile, replace)?);
+        return Ok(json!({"imported": imported, "skipped": skipped}));
+    }
+    let files = folder_files(&path)?;
+    if files.is_empty() {
+        return Err(bad(CMD, format!("no `.device` or `{}` files in {}", native::EXTENSION, path.display())));
+    }
+    for (i, f) in files.iter().enumerate() {
+        let file = f.to_string_lossy().into_owned();
+        if i >= MAX_FOLDER_FILES {
+            skipped.push(json!({"file": file, "error": format!("more than {MAX_FOLDER_FILES} files")}));
+            continue;
+        }
+        match read_one(f, scale).and_then(|profile| insert(s, profile, replace).map_err(|e| e.to_string())) {
+            Ok(id) => imported.push(id),
+            Err(error) => skipped.push(json!({"file": file, "error": error})),
+        }
+    }
+    s.message = Some(format!("Imported {} devices", imported.len()));
+    Ok(json!({"imported": imported, "skipped": skipped}))
+}
+
+fn read_one(path: &Path, scale: Option<f64>) -> std::result::Result<DeviceProfile, String> {
+    let bytes = file_access::read_capped(path, figcraft_device::MAX_FILE_BYTES).map_err(|e| e.to_string())?;
+    figcraft_device::parse(&bytes, &hint_for(Some(path), scale)).map_err(|e| e.to_string())
+}
+
+fn insert(s: &mut Session, profile: DeviceProfile, replace: bool) -> Result<String> {
+    let id = profile.id.clone();
+    s.devices.insert(profile, replace).map_err(|e| device_err("device.import", e))?;
+    Ok(id)
+}
+
+/// `v` rounded to 4 decimals (points are often thirds).
+fn r4(v: f64) -> f64 {
+    (v * 1e4).round() / 1e4
+}
+
+fn size_json((w, h): (f64, f64)) -> Value {
+    json!({"width": r4(w), "height": r4(h)})
+}
+
+fn rect_json(r: PxRect) -> Value {
+    json!({"x": r4(r.x), "y": r4(r.y), "width": r4(r.width), "height": r4(r.height)})
+}
+
+fn insets_json(i: Insets) -> Value {
+    json!({"top": r4(i.top), "right": r4(i.right), "bottom": r4(i.bottom), "left": r4(i.left)})
+}
+
+fn screen_summary(sc: &Screen) -> Value {
+    let (w, h) = sc.size_pt(Orientation::Portrait);
+    json!({
+        "widthPx": sc.width_px, "heightPx": sc.height_px, "scale": r4(sc.scale), "scaleSource": sc.scale_source.name(),
+        "widthPt": r4(w), "heightPt": r4(h),
+        "orientations": sc.supported().iter().map(|o| o.name()).collect::<Vec<_>>(),
+    })
+}
+
+fn device_list(s: &mut Session, p: &Value) -> Result<Value> {
+    let platform = match params::string(p, "platform") {
+        None => None,
+        Some(name) => Some(Platform::parse(&name).ok_or_else(|| bad("device.list", "`platform` must be ios, android or other"))?),
+    };
+    Ok(Value::Array(
+        s.devices
+            .iter()
+            .filter(|d| platform.is_none_or(|pl| d.platform == pl))
+            .map(|d| {
+                json!({
+                    "id": d.id, "name": d.name, "platform": d.platform.name(), "source": d.source.name(),
+                    "screens": d.screens.iter().map(screen_summary).collect::<Vec<_>>(),
+                })
+            })
+            .collect(),
+    ))
+}
+
+fn profile<'a>(s: &'a Session, cmd: &str, p: &Value) -> Result<&'a DeviceProfile> {
+    let id = params::req_string(cmd, p, "id")?;
+    s.devices.get(&id).ok_or_else(|| bad(cmd, format!("no device `{id}` (see device.list; import with device.import)")))
+}
+
+fn device_get(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "device.get";
+    let d = profile(s, CMD, p)?;
+    let index = match get(p, "screen") {
+        None => 0,
+        Some(_) => params::req_index(CMD, p, "screen")?,
+    };
+    let sc = d.screen(index).ok_or_else(|| bad(CMD, format!("`screen` must be below {}", d.screens.len())))?;
+    let supported = sc.supported();
+    let names: Vec<&str> = supported.iter().map(|o| o.name()).collect();
+    let o = match params::string(p, "orientation") {
+        None => supported.first().copied().ok_or_else(|| bad(CMD, "the device lists no orientations"))?,
+        Some(name) => {
+            let o = Orientation::parse(&name)
+                .ok_or_else(|| bad(CMD, "`orientation` must be portrait, portraitUpsideDown, landscapeLeft or landscapeRight"))?;
+            if !supported.contains(&o) {
+                return Err(bad(CMD, format!("{} doesn't support {} (it supports {})", d.name, o.name(), names.join(", "))));
+            }
+            o
+        }
+    };
+    let k = 1.0 / sc.scale;
+    let insets = sc.insets_px(o).unwrap_or_default();
+    let safe = sc.safe_area_px(o).unwrap_or_default();
+    let cutouts: Vec<PxRect> = sc.info(o).map(|i| i.cutouts.clone()).unwrap_or_default();
+    Ok(json!({
+        "id": d.id, "name": d.name, "platform": d.platform.name(), "model": d.model, "os": d.os, "source": d.source,
+        "screen": index, "screens": d.screens.len(),
+        "orientation": o.name(), "orientations": names,
+        "scale": r4(sc.scale), "scaleSource": sc.scale_source.name(), "dpi": sc.dpi,
+        "sizePx": size_json(sc.size_px(o)), "sizePt": size_json(sc.size_pt(o)),
+        "safeAreaPx": rect_json(safe), "safeAreaPt": rect_json(safe.scaled(k)),
+        "insetsPx": insets_json(insets), "insetsPt": insets_json(insets.scaled(k)),
+        "cutoutsPx": cutouts.iter().map(|c| rect_json(*c)).collect::<Vec<_>>(),
+        "cutoutsPt": cutouts.iter().map(|c| rect_json(c.scaled(k))).collect::<Vec<_>>(),
+        "cornerRadiusPx": r4(sc.corner_radius_px), "cornerRadiusPt": r4(sc.corner_radius_px * k),
+        "navigationBarPx": r4(sc.navigation_bar_px),
+        "overlay": sc.overlay.as_ref().map(|ov| json!({"path": ov.path, "borderPx": insets_json(ov.border_px)})),
+    }))
+}
+
+fn device_export(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "device.export";
+    let d = profile(s, CMD, p)?;
+    let text = native::to_string(d).map_err(|e| device_err(CMD, e))?;
+    let id = d.id.clone();
+    if let Some(path) = get(p, "path") {
+        let Some(path) = path.as_str().filter(|p| p.to_ascii_lowercase().ends_with(".json")) else {
+            return Err(bad(CMD, "`path` must be a `.json` file"));
+        };
+        file_access::write(path, text.as_bytes())?;
+        return Ok(json!({"id": id, "path": path}));
+    }
+    Ok(json!({"id": id, "json": text}))
+}
+
+fn device_remove(s: &mut Session, p: &Value) -> Result<Value> {
+    if params::boolean(p, "all") == Some(true) {
+        return Ok(json!({"removed": s.devices.clear()}));
+    }
+    let id = params::req_string("device.remove", p, "id")?;
+    Ok(json!({"removed": usize::from(s.devices.remove(&id))}))
+}

@@ -799,6 +799,8 @@ pub struct Session {
     pub live: live::Lives,
     /// Commands the UI runs without waiting on a server ([`Session::start_background`]).
     pub background: background::Background,
+    /// Device profiles imported this session (`device.*`, `docs/device-profiles.md`).
+    pub devices: figcraft_device::DeviceRegistry,
 }
 
 impl Default for Session {
@@ -846,6 +848,7 @@ impl Session {
             plugins: plugins::Runtime::default(),
             live: live::Lives::default(),
             background: background::Background::default(),
+            devices: figcraft_device::DeviceRegistry::default(),
         }
     }
 
@@ -1648,6 +1651,8 @@ mod dev_resources_tests;
 mod devcompare_tests;
 #[cfg(test)]
 mod devfocus_tests;
+#[cfg(test)]
+mod device_tests;
 #[cfg(test)]
 mod devinspect_tests;
 #[cfg(test)]

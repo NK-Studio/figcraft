@@ -425,6 +425,9 @@ fn every_command_survives_junk_params() {
         // Rotation origins and placing with a tool as junk.
         json!({"tool": [1], "x": 1e308, "y": "NaN", "reset": "maybe", "on": {"x": 1}}),
         json!({"tool": "frame", "x": -1e308, "y": 1e308, "reset": true, "on": "yes"}),
+        // Device profiles: files, text, scales, orientations and screens as junk.
+        json!({"path": [5], "text": "{\"friendlyName\": 1, \"screens\": [{}]}", "scale": 1e308, "orientation": "sideways", "screen": -1, "platform": 7}),
+        json!({"text": "{\"format\": \"figcraft-device\", \"screens\": [{\"widthPx\": 1e308}]}", "scale": "NaN", "orientation": 9, "screen": 1e308, "all": "maybe"}),
     ];
     for spec in all_commands() {
         if matches!(
