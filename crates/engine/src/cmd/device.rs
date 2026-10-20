@@ -63,6 +63,13 @@ pub fn specs() -> Vec<CommandSpec> {
             frame_device_set
         ),
         spec!("frame.device.clear", "Clear Frame Device", "{ids? (default the selection)}", true, frame_device_clear),
+        spec!(
+            "unity.canvasScaler.set",
+            "Set Canvas Scaler",
+            "{ids? (frames; default the selection), referenceResolution? ([w, h] in canvas units, default 1080 × 1920), screenMatchMode? (\"matchWidthOrHeight\" | \"expand\" | \"shrink\"), match? (0 width … 1 height)} → {ids, canvasScaler}: the frames' contents scale as Unity's Scale With Screen Size canvas when they change size; null clears",
+            true,
+            canvas_scaler_set
+        ),
     ]
 }
 
@@ -402,6 +409,8 @@ pub(crate) fn turn_frame_device(s: &mut Session, id: NodeId, followers: Option<S
 pub(crate) struct SafeFollowers {
     frame: NodeId,
     old_safe: BoxRect,
+    /// The frame's size before the change (a canvas scaler scales the layers by the change).
+    old_size: (f64, f64),
     /// (layer, x, y, width, height) in the frame.
     layers: Vec<(NodeId, f64, f64, f64, f64)>,
 }
@@ -421,7 +430,7 @@ pub(crate) fn safe_followers(doc: &figcraft_doc::Document, frame: NodeId) -> Opt
             layers.push((c.id, at.x, at.y, c.width, c.height));
         }
     }
-    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), layers })
+    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), old_size: (n.width, n.height), layers })
 }
 
 /// One axis of a constraint from a box `from` long to one `to` long: the new position and size.
@@ -449,6 +458,8 @@ fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &D
     let Some(n) = doc.node(f.frame) else { return Ok(()) };
     let new_safe = snap.safe_rect_for(n.width, n.height);
     let (o, s) = (f.old_safe, new_safe);
+    // With a canvas scaler the layers (and the old safe area with them) were scaled first.
+    let k = n.canvas_scaler.map_or(1.0, |c| c.factor(f.old_size, (n.width, n.height)));
     for &(id, x, y, w, h) in &f.layers {
         let Some(c) = doc.node(id) else { continue };
         let hpin = match c.constraints.horizontal {
@@ -465,8 +476,8 @@ fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &D
             figcraft_doc::VConstraint::TopBottom => Pin::Stretch,
             figcraft_doc::VConstraint::Scale => Pin::Scale,
         };
-        let (nx, nw) = follow(hpin, x - o.x, w, o.width, s.width);
-        let (ny, nh) = follow(vpin, y - o.y, h, o.height, s.height);
+        let (nx, nw) = follow(hpin, (x - o.x) * k, w * k, o.width * k, s.width);
+        let (ny, nh) = follow(vpin, (y - o.y) * k, h * k, o.height * k, s.height);
         let mut props = serde_json::Map::new();
         props.insert("x".into(), json!(r4(nx + s.x)));
         props.insert("y".into(), json!(r4(ny + s.y)));
@@ -475,4 +486,41 @@ fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &D
         crate::cmd::props::apply("frame.device.set", doc, id, &props)?;
     }
     Ok(())
+}
+
+fn canvas_scaler_set(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "unity.canvasScaler.set";
+    let ids = frame_targets(CMD, s, p)?;
+    let clear = p.get("referenceResolution").is_some_and(Value::is_null) || params::boolean(p, "clear") == Some(true);
+    let doc = s.doc_mut()?;
+    let mut out = Value::Null;
+    for i in &ids {
+        let n = doc.get_mut(*i)?;
+        if clear {
+            n.canvas_scaler = None;
+            continue;
+        }
+        let mut c = n.canvas_scaler.unwrap_or_default();
+        if let Some(r) = get(p, "referenceResolution") {
+            let wh = r.as_array().filter(|a| a.len() == 2).and_then(|a| Some((params::f64_of(a.first()?)?, params::f64_of(a.get(1)?)?)));
+            let Some((w, h)) = wh.filter(|(w, h)| (1.0..=100_000.0).contains(w) && (1.0..=100_000.0).contains(h)) else {
+                return Err(bad(CMD, "`referenceResolution` must be [width, height], 1 to 100000"));
+            };
+            (c.reference_width, c.reference_height) = (w, h);
+        }
+        if let Some(m) = params::string(p, "screenMatchMode") {
+            c.screen_match_mode = match m.to_ascii_lowercase().as_str() {
+                "matchwidthorheight" | "match" => figcraft_doc::ScreenMatchMode::MatchWidthOrHeight,
+                "expand" => figcraft_doc::ScreenMatchMode::Expand,
+                "shrink" => figcraft_doc::ScreenMatchMode::Shrink,
+                _ => return Err(bad(CMD, "`screenMatchMode` must be matchWidthOrHeight, expand or shrink")),
+            };
+        }
+        if let Some(m) = get(p, "match") {
+            c.match_width_or_height = params::f64_of(m).filter(|m| (0.0..=1.0).contains(m)).ok_or_else(|| bad(CMD, "`match` must be from 0 to 1"))?;
+        }
+        n.canvas_scaler = Some(c);
+        out = serde_json::to_value(c).unwrap_or(Value::Null);
+    }
+    Ok(json!({"ids": ids, "canvasScaler": out}))
 }

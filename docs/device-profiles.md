@@ -154,12 +154,15 @@ without the profile or Unity installed.
   corners, and the device's cutouts (notch, island, hole punch) in black. It's drawn only outside
   the screen (and in its corners and cutouts), and the frame's label moves above it. Turned frames
   have none. No device pictures are used.
-- **Right panel**: the frame type dropdown lists the imported devices under *Devices* (their
+- **Right panel**: the frame type dropdown lists the imported devices first under *Devices* (their
   portrait size), then *Clear device* when a selected frame has one, and *Import devices…* (a
-  folder picker; the folder is remembered).
-- **Changing the device**: layers inside the safe area (and off the frame's edges) are placed
-  against the new device's safe area by their constraints, as Unity's SafeArea container places
-  them; other layers follow the frame (`DeviceFrame::holds`).
+  folder picker; the folder is remembered); the size presets follow under *Sizes only (not a
+  device)*, since they only set the frame's size.
+- **Changing the device**: layers inside the safe area are placed against the new device's safe
+  area by their constraints, as Unity's SafeArea container places them; other layers follow the
+  frame (`DeviceFrame::holds`). A layer flush with a frame edge bleeds (backgrounds), unless it also
+  lies on an inset edge of the safe area (a window a SafeArea component sizes, under the notch).
+  With a canvas scaler on the frame (`docs/unity-uitk.md` › Canvas scaler) everything scales first.
 - **Orientation**: `frame.swapOrientation` turns a device frame's snapshot too (portrait, else
   upside down ⇄ landscape left, else right) when the profile is imported; otherwise it drops the
   device with a message, since the turned safe area isn't known.

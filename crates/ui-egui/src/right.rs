@@ -559,18 +559,8 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                 kind_items(app, ui, true);
                 ui.separator();
-                let mut cat = "";
-                for (c, name, pw, ph) in figcraft_engine::cmd::create::FRAME_PRESETS {
-                    if *c != cat {
-                        cat = c;
-                        ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
-                    }
-                    if menu_item(ui, name, &format!("{}×{}", pw, ph)) {
-                        app.set_props(&ids, json!({"width": pw, "height": ph}));
-                        ui.close();
-                    }
-                }
-                ui.separator();
+                // Devices first: they bring a safe area, cutouts and a body; the presets below
+                // only set the size.
                 ui.label(egui::RichText::new(tr("Devices")).font(semibold(11.0)).color(t.text_secondary));
                 for (id, name, w, h) in &devices {
                     let size = |v: f64| (v * 10.0).round() / 10.0;
@@ -593,6 +583,19 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                             app.services.save_prefs(&app.session.prefs);
                         }
                     });
+                }
+                ui.separator();
+                ui.label(egui::RichText::new(tr("Sizes only (not a device)")).font(semibold(11.0)).color(t.text_secondary));
+                let mut cat = "";
+                for (c, name, pw, ph) in figcraft_engine::cmd::create::FRAME_PRESETS {
+                    if *c != cat {
+                        cat = c;
+                        ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
+                    }
+                    if menu_item(ui, name, &format!("{}×{}", pw, ph)) {
+                        app.set_props(&ids, json!({"width": pw, "height": ph}));
+                        ui.close();
+                    }
                 }
             });
         });

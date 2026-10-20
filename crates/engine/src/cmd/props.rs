@@ -1181,6 +1181,15 @@ pub fn resize_node(doc: &mut Document, id: NodeId, w: f64, h: f64) -> Result<()>
     let (ow, oh) = (n.width, n.height);
     let group = n.kind.bounds_follow_children();
     let section = matches!(n.kind, NodeKind::Section { .. });
+    // A frame with Unity's CanvasScaler: its contents scale as the canvas does, then their
+    // constraints take up what's left (`docs/unity-uitk.md` › Canvas scaler).
+    let canvas = n.canvas_scaler.filter(|_| n.kind.is_frame_like()).map(|c| c.factor((ow, oh), (w, h))).filter(|k| (k - 1.0).abs() > 1e-9);
+    if let Some(k) = canvas {
+        scale_canvas_contents(doc, id, k)?;
+        figcraft_layout::set_size(doc, id, w, h);
+        figcraft_layout::apply_constraints(doc, id, ow * k, oh * k);
+        return Ok(());
+    }
     figcraft_layout::set_size(doc, id, w, h);
     if section {
         // Sections have no constraints: what's in them stays as it is.
@@ -1191,6 +1200,26 @@ pub fn resize_node(doc: &mut Document, id: NodeId, w: f64, h: f64) -> Result<()>
     } else {
         // In an auto layout frame this moves only the children that ignore auto layout.
         figcraft_layout::apply_constraints(doc, id, ow, oh);
+    }
+    Ok(())
+}
+
+/// Scale everything in frame `id` by `k` about its top-left (not the frame itself): each child
+/// with its contents, as the Scale tool does, and the frame's own auto layout spacing.
+pub fn scale_canvas_contents(doc: &mut Document, id: NodeId, k: f64) -> Result<()> {
+    if !(k.is_finite() && k > 0.0) {
+        return Ok(());
+    }
+    for c in doc.get(id)?.children.clone() {
+        super::arrange::scale_node(doc, c, k)?;
+        let n = doc.get_mut(c)?;
+        let m = n.transform.as_coeffs();
+        n.transform = figcraft_geom::Affine::new([m[0], m[1], m[2], m[3], m[4] * k, m[5] * k]);
+    }
+    if let Some(l) = doc.get_mut(id)?.layout.as_mut() {
+        l.gap *= k;
+        l.cross_gap *= k;
+        l.padding = l.padding.map(|x| x * k);
     }
     Ok(())
 }

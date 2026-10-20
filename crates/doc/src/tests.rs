@@ -505,3 +505,34 @@ fn device_frames_hold_layers_inside_the_safe_area_off_the_edges() {
     assert!(flat.holds(400.0, 800.0, 1.0, 300.0, 100.0, 100.0));
     assert!(!flat.holds(400.0, 800.0, f64::NAN, 300.0, 100.0, 100.0));
 }
+
+#[test]
+fn canvas_scaler_points_per_unit() {
+    use crate::{CanvasScaler, ScreenMatchMode};
+    let mut c =
+        CanvasScaler { reference_width: 1080.0, reference_height: 1920.0, screen_match_mode: ScreenMatchMode::Expand, match_width_or_height: 0.0 };
+    // iPhone 12 mini: the width decides (375/1080 < 812/1920).
+    assert!((c.points_per_unit(375.0, 812.0).unwrap() - 375.0 / 1080.0).abs() < 1e-12);
+    assert!((c.factor((375.0, 812.0), (440.0, 956.0)) - 440.0 / 375.0).abs() < 1e-12);
+    c.screen_match_mode = ScreenMatchMode::Shrink;
+    assert!((c.points_per_unit(375.0, 812.0).unwrap() - 812.0 / 1920.0).abs() < 1e-12);
+    c.screen_match_mode = ScreenMatchMode::MatchWidthOrHeight;
+    c.match_width_or_height = 0.5;
+    let geo = ((375.0f64 / 1080.0) * (812.0 / 1920.0)).sqrt();
+    assert!((c.points_per_unit(375.0, 812.0).unwrap() - geo).abs() < 1e-12);
+    c.reference_width = 0.0;
+    assert_eq!(c.points_per_unit(375.0, 812.0), None);
+    assert_eq!(c.factor((375.0, 812.0), (440.0, 956.0)), 1.0);
+}
+
+#[test]
+fn a_layer_filling_the_safe_area_follows_it_though_flush_at_the_sides() {
+    use crate::{DeviceFrame, SideInsets};
+    let d =
+        DeviceFrame { width: 375.0, height: 812.0, safe_area: SideInsets { top: 50.0, bottom: 34.0, ..Default::default() }, ..Default::default() };
+    // The window a SafeArea component sizes: flush left and right, on the inset top and bottom.
+    assert!(d.holds(375.0, 812.0, 0.0, 50.0, 375.0, 728.0));
+    // A background: flush, and on no inset edge.
+    assert!(!d.holds(375.0, 812.0, 0.0, 0.0, 375.0, 812.0));
+    assert!(!d.holds(375.0, 812.0, 0.0, 300.0, 100.0, 100.0));
+}

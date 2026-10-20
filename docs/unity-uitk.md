@@ -290,6 +290,27 @@ device's size.
 halving, and the scripts on a real device (the run set the SafeArea the way `FigcraftSafeArea`
 does rather than through the Device Simulator).
 
+## Canvas scaler
+
+Unity UI built with uGUI usually sits on a canvas with a **CanvasScaler** in *Scale With Screen
+Size* mode: on a bigger or smaller screen the whole canvas scales, and anchors only take up what's
+left. Constraints alone (FigCraft's model) don't do that, so a screen brought over from Unity broke
+on a wider device (layers anchored to a corner kept their size). A frame can now carry one:
+`Node::canvas_scaler: Option<CanvasScaler {referenceWidth, referenceHeight, screenMatchMode
+(matchWidthOrHeight | expand | shrink), matchWidthOrHeight}>` (`unity.canvasScaler.set`; null or
+`clear` removes it; the Design tab's Unity section for top-level frames; saved and synced).
+
+When such a frame changes size (W/H, a size preset, `frame.device.set`, `frame.swapOrientation`),
+`resize_node` first scales everything in it by `k = u(new) / u(old)` — the Scale tool's scaling:
+sizes, positions, text, strokes, effects, radii, spacing — then applies the constraints from
+`old × k` to the new size. `u` is Unity's scale factor in points per canvas unit, which doesn't
+depend on the screen's pixels per point: `expand` → `min(w / refW, h / refH)`, `shrink` → `max`,
+`matchWidthOrHeight` → `(w / refW)^(1−m) · (h / refH)^m`. Layers following the safe area are scaled
+the same way before their constraints place them on the new safe area.
+
+The ArrowsAndCats card show (Unity 6.0, 1080 × 1920 Expand) imported this way keeps its layout from
+iPhone 12 mini to iPhone 13 Pro Max.
+
 ## Phases
 
 - **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),

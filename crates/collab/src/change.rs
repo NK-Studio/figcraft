@@ -183,6 +183,7 @@ node_props! {
     DevResources => dev_resources,
     Device => device,
     Pivot => pivot,
+    CanvasScaler => canvas_scaler,
 }
 
 /// A document-level property. Lists of entries with ids (styles, comments, variable collections,

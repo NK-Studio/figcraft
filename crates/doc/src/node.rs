@@ -401,6 +401,67 @@ impl NodeKind {
     }
 }
 
+/// How Unity's CanvasScaler (Scale With Screen Size) matches the screen to its reference
+/// resolution.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ScreenMatchMode {
+    /// Between the width (0) and the height (1), by `match_width_or_height`.
+    #[default]
+    MatchWidthOrHeight,
+    /// The canvas grows past the reference: it's never smaller than it.
+    Expand,
+    /// The canvas shrinks below the reference: it's never larger than it.
+    Shrink,
+}
+
+/// Unity's CanvasScaler in Scale With Screen Size mode, on a frame.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct CanvasScaler {
+    /// The reference resolution, in canvas units.
+    pub reference_width: f64,
+    pub reference_height: f64,
+    pub screen_match_mode: ScreenMatchMode,
+    /// 0: match the width, 1: the height (MatchWidthOrHeight).
+    pub match_width_or_height: f64,
+}
+
+impl Default for CanvasScaler {
+    fn default() -> Self {
+        Self { reference_width: 1080.0, reference_height: 1920.0, screen_match_mode: ScreenMatchMode::MatchWidthOrHeight, match_width_or_height: 0.0 }
+    }
+}
+
+impl CanvasScaler {
+    /// Points per canvas unit on a `w × h` pt screen (Unity's scale factor over the screen's
+    /// pixels per point, which cancels out); `None` when it can't be worked out.
+    pub fn points_per_unit(&self, w: f64, h: f64) -> Option<f64> {
+        let (rw, rh) = (self.reference_width, self.reference_height);
+        if ![w, h, rw, rh].iter().all(|v| v.is_finite() && *v > 0.0) {
+            return None;
+        }
+        let (sx, sy) = (w / rw, h / rh);
+        let u = match self.screen_match_mode {
+            ScreenMatchMode::MatchWidthOrHeight => {
+                let m = if self.match_width_or_height.is_finite() { self.match_width_or_height.clamp(0.0, 1.0) } else { 0.0 };
+                (sx.log2() * (1.0 - m) + sy.log2() * m).exp2()
+            }
+            ScreenMatchMode::Expand => sx.min(sy),
+            ScreenMatchMode::Shrink => sx.max(sy),
+        };
+        (u.is_finite() && u > 0.0).then_some(u)
+    }
+
+    /// How much a frame's contents scale when it goes from `old` to `new` (pt): 1 when unknown.
+    pub fn factor(&self, old: (f64, f64), new: (f64, f64)) -> f64 {
+        match (self.points_per_unit(old.0, old.1), self.points_per_unit(new.0, new.1)) {
+            (Some(a), Some(b)) => b / a,
+            _ => 1.0,
+        }
+    }
+}
+
 /// A point of a layer as a share of its size: (0, 0) the top-left corner, (1, 1) the bottom-right.
 #[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
 #[serde(default)]
@@ -495,16 +556,23 @@ impl DeviceFrame {
     }
 
     /// Whether a layer at `(x, y)` of size `cw × ch` in a `w × h` frame is inside its safe area
-    /// (half a point of slack) without touching the frame's edges: such layers follow the safe
-    /// area, in FigCraft when the device changes and in Unity through the SafeArea container. A
-    /// layer flush with an edge bleeds (backgrounds), so it follows the frame even on a device
-    /// with no inset on that side.
+    /// (half a point of slack): such layers follow the safe area, in FigCraft when the device
+    /// changes and in Unity through the SafeArea container. A layer flush with a frame edge bleeds
+    /// (backgrounds) and follows the frame, unless it also lies on an inset edge of the safe area
+    /// (a layer that fills the safe area under a notch).
     pub fn holds(&self, w: f64, h: f64, x: f64, y: f64, cw: f64, ch: f64) -> bool {
         const SLACK: f64 = 0.5;
         let s = self.safe_rect_for(w, h);
+        let i = self.insets_for(w, h);
         let flush = x <= SLACK || y <= SLACK || x + cw >= w - SLACK || y + ch >= h - SLACK;
+        // Touching a safe edge that's in from the frame's (under a notch, above a home bar): the
+        // layer is placed on the safe area (a SafeArea container), even if it's flush elsewhere.
+        let on_inset_edge = (i.left > SLACK && (x - s.x).abs() <= SLACK)
+            || (i.top > SLACK && (y - s.y).abs() <= SLACK)
+            || (i.right > SLACK && (x + cw - (s.x + s.width)).abs() <= SLACK)
+            || (i.bottom > SLACK && (y + ch - (s.y + s.height)).abs() <= SLACK);
         [x, y, cw, ch].iter().all(|v| v.is_finite())
-            && !flush
+            && (!flush || on_inset_edge)
             && x >= s.x - SLACK
             && y >= s.y - SLACK
             && x + cw <= s.x + s.width + SLACK
@@ -647,6 +715,10 @@ pub struct Node {
     /// imply; see `docs/unity-uitk.md` › Pivot).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pivot: Option<Pivot>,
+    /// Frames: Unity's CanvasScaler (Scale With Screen Size) — when the frame changes size its
+    /// contents scale as Unity's canvas does, then their constraints take up what's left.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canvas_scaler: Option<CanvasScaler>,
 }
 
 pub(crate) fn yes() -> bool {
@@ -759,6 +831,7 @@ impl Node {
             dev_resources: Vec::new(),
             device: None,
             pivot: None,
+            canvas_scaler: None,
         }
     }
 

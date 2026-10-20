@@ -109,8 +109,65 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
     if info.position == Position::Absolute {
         pivot_row(app, ui, sel, info.pivot, info.pivot_set);
     }
+    if info.position == Position::Root && doc.node(first).is_some_and(|n| n.kind.is_frame_like()) {
+        canvas_scaler_rows(app, ui, doc, first);
+    }
     issues(app, ui, doc, sel);
     export_button(app, ui, Some(sel));
+}
+
+/// A top-level frame's Unity CanvasScaler (Scale With Screen Size): none, or how it matches the
+/// screen, its reference resolution and the match.
+fn canvas_scaler_rows(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
+    use figcraft_doc::ScreenMatchMode;
+    let t = Tokens::get(ui.ctx());
+    let c = doc.node(id).and_then(|n| n.canvas_scaler);
+    let label = match c.map(|c| c.screen_match_mode) {
+        None => tr("None"),
+        Some(ScreenMatchMode::MatchWidthOrHeight) => tr("Match width or height"),
+        Some(ScreenMatchMode::Expand) => "Expand",
+        Some(ScreenMatchMode::Shrink) => "Shrink",
+    };
+    row(ui, 32.0, |ui| {
+        widgets::label(ui, tr("Canvas scaler"), t.text_secondary);
+        let resp = widgets::dropdown(ui, label, 150.0, None);
+        menu_popup(&resp).show(|ui| {
+            if menu_item(ui, tr("None"), "") {
+                app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": null}));
+                ui.close();
+            }
+            for (name, mode) in [(tr("Match width or height"), "matchWidthOrHeight"), ("Expand", "expand"), ("Shrink", "shrink")] {
+                if menu_item(ui, name, "") {
+                    app.run("unity.canvasScaler.set", json!({"ids": [id], "screenMatchMode": mode}));
+                    ui.close();
+                }
+            }
+        });
+    });
+    let Some(c) = c else { return };
+    let num = |v: f64| format!("{}", (v * 1000.0).round() / 1000.0);
+    row(ui, 32.0, |ui| {
+        widgets::label(ui, tr("Reference"), t.text_secondary);
+        if let Some(v) = widgets::text_field(ui, Id::new(("cs_w", id)), &num(c.reference_width), 64.0, "W").and_then(|v| v.trim().parse::<f64>().ok())
+        {
+            app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": [v, c.reference_height]}));
+        }
+        if let Some(v) =
+            widgets::text_field(ui, Id::new(("cs_h", id)), &num(c.reference_height), 64.0, "H").and_then(|v| v.trim().parse::<f64>().ok())
+        {
+            app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": [c.reference_width, v]}));
+        }
+    });
+    if c.screen_match_mode == ScreenMatchMode::MatchWidthOrHeight {
+        row(ui, 32.0, |ui| {
+            widgets::label(ui, tr("Match (0 width – 1 height)"), t.text_secondary);
+            if let Some(v) =
+                widgets::text_field(ui, Id::new(("cs_m", id)), &num(c.match_width_or_height), 56.0, "").and_then(|v| v.trim().parse::<f64>().ok())
+            {
+                app.run("unity.canvasScaler.set", json!({"ids": [id], "match": v.clamp(0.0, 1.0)}));
+            }
+        });
+    }
 }
 
 /// The 9-point pivot picker, the pivot as numbers, and Reset when the layer sets its own.

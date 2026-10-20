@@ -138,6 +138,9 @@ pub fn node_json(doc: &Document, id: NodeId, depth: usize) -> Value {
         if !n.annotations.is_empty() {
             o.insert("annotations".into(), serde_json::to_value(&n.annotations).unwrap_or(Value::Null));
         }
+        if let Some(c) = n.canvas_scaler {
+            o.insert("canvasScaler".into(), serde_json::to_value(c).unwrap_or(Value::Null));
+        }
         if let Some(pv) = n.pivot {
             o.insert("pivot".into(), json!({"x": pv.x, "y": pv.y}));
         }

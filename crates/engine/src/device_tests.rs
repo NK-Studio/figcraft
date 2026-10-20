@@ -3,6 +3,7 @@
 use serde_json::{Value, json};
 
 use crate::Session;
+use figcraft_doc::NodeKind;
 
 /// A synthetic Unity-shaped device file (made-up numbers).
 fn unity_device(name: &str) -> Value {
@@ -253,4 +254,77 @@ fn layers_in_the_safe_area_follow_it_when_the_device_changes() {
     // One undo step puts everything back.
     s.execute("edit.undo", &json!({})).unwrap();
     assert!((y(&s, top) - 60.0).abs() < 1e-3);
+}
+
+#[test]
+fn a_canvas_scaler_scales_contents_then_applies_constraints() {
+    let mut s = Session::new();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 375, "height": 812})).unwrap());
+    let r = s.execute("unity.canvasScaler.set", &json!({"ids": [f], "referenceResolution": [1080, 1920], "screenMatchMode": "expand"})).unwrap();
+    assert_eq!(r["canvasScaler"]["screenMatchMode"], "expand");
+    // Anchored to a corner at a fixed size, as Unity UI often is.
+    let bg = node_id(&s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 375, "height": 812, "parent": f})).unwrap());
+    let right = node_id(&s.execute("shape.rectangle", &json!({"x": 335, "y": 10, "width": 30, "height": 30, "parent": f})).unwrap());
+    s.execute("node.set", &json!({"id": right, "props": {"constraints": {"horizontal": "right", "vertical": "top"}}})).unwrap();
+    let t = node_id(&s.execute("text.create", &json!({"text": "Hi", "x": 10, "y": 100, "parent": f, "props": {"fontSize": 20}})).unwrap());
+    // A wider screen: everything grows by 440/375 (the width decides), then the 3 pt of extra
+    // height go to the constraints.
+    s.execute("node.set", &json!({"id": f, "props": {"width": 440, "height": 956}})).unwrap();
+    let k = 440.0 / 375.0;
+    let n = |s: &Session, id| s.doc().unwrap().node(id).unwrap().clone();
+    let b = n(&s, bg);
+    assert!((b.width - 440.0).abs() < 1e-6 && (b.height - 812.0 * k).abs() < 1e-6, "{} {}", b.width, b.height);
+    let rn = n(&s, right);
+    let x = rn.transform.as_coeffs()[4];
+    assert!((rn.width - 30.0 * k).abs() < 1e-6 && (440.0 - x - rn.width - 10.0 * k).abs() < 1e-6, "right margin scales: {x}");
+    let NodeKind::Text(td) = &n(&s, t).kind else { panic!("text") };
+    assert!((td.style.font_size - 20.0 * k).abs() < 1e-6);
+    // Undo is one step; without a scaler the frame only applies constraints.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert_eq!(n(&s, bg).width, 375.0);
+    s.execute("unity.canvasScaler.set", &json!({"ids": [f], "referenceResolution": null})).unwrap();
+    assert!(n(&s, f).canvas_scaler.is_none());
+    s.execute("node.set", &json!({"id": f, "props": {"width": 440, "height": 956}})).unwrap();
+    assert_eq!(n(&s, bg).width, 375.0);
+    for bad in [json!({"ids": [f], "referenceResolution": [0, 5]}), json!({"ids": [f], "screenMatchMode": "zoom"}), json!({"ids": [f], "match": 2})] {
+        assert!(s.execute("unity.canvasScaler.set", &bad).is_err(), "{bad}");
+    }
+    let rect = node_id(&s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 5, "height": 5})).unwrap());
+    assert!(s.execute("unity.canvasScaler.set", &json!({"ids": [rect]})).is_err());
+}
+
+#[test]
+fn a_canvas_scaler_and_the_safe_area_work_together_on_a_device_change() {
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"text": unity_device("Notch Phone").to_string()})).unwrap();
+    let mut big = unity_device("Big Phone");
+    big["screens"][0]["width"] = json!(1440);
+    big["screens"][0]["height"] = json!(3120);
+    big["screens"][0]["orientations"][0]["safeArea"] = json!({"x": 0.0, "y": 108.0, "width": 1440.0, "height": 2832.0});
+    big["screens"][0]["orientations"][0]["cutouts"] = json!([]);
+    s.execute("device.import", &json!({"text": big.to_string()})).unwrap();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/notch-phone"})).unwrap();
+    s.execute("unity.canvasScaler.set", &json!({"ids": [f], "referenceResolution": [1080, 1920], "screenMatchMode": "expand"})).unwrap();
+    // Notch phone: 400 × 866.67 pt, safe area 50..836.67. A window filling it (a SafeArea), with
+    // a box 10 pt below its top.
+    let win = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 50, "width": 400, "height": 786.5, "parent": f})).unwrap());
+    s.execute("node.set", &json!({"id": win, "props": {"constraints": {"horizontal": "leftRight", "vertical": "topBottom"}, "fills": []}})).unwrap();
+    let boxed = node_id(&s.execute("shape.rectangle", &json!({"x": 20, "y": 10, "width": 40, "height": 20, "parent": win})).unwrap());
+    // Big phone: 480 × 1040 pt (scale 3), safe area 60..1004 (Unity's y is the bottom inset).
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/big-phone"})).unwrap();
+    let n = |s: &Session, id| s.doc().unwrap().node(id).unwrap().clone();
+    let w = n(&s, win);
+    let c = w.transform.as_coeffs();
+    // Stretched on the safe area: 786.5 × 1.2 plus what the safe area gained beyond the scale.
+    assert!(
+        (c[5] - 60.0).abs() < 1e-3 && (w.width - 480.0).abs() < 1e-3 && (w.height - (786.5 * 1.2 + 944.0 - 786.6667 * 1.2)).abs() < 1e-2,
+        "{c:?} {} {}",
+        w.width,
+        w.height
+    );
+    // The box scaled by 480/400 and stayed 10 pt (scaled) below the window's top.
+    let k = 480.0 / 400.0;
+    let b = n(&s, boxed);
+    assert!((b.width - 40.0 * k).abs() < 1e-3 && (b.transform.as_coeffs()[5] - 10.0 * k).abs() < 1e-3);
 }
