@@ -251,17 +251,31 @@ fn visuals(t: Tokens) -> Visuals {
 /// style editor), whichever theme the app shows.
 pub fn on_dark<R>(ui: &mut egui::Ui, f: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let ctx = ui.ctx().clone();
-    let saved = Tokens::get(&ctx);
-    let dark = Tokens::dark();
-    ctx.data_mut(|d| d.insert_temp(tokens_id(), dark));
-    let r = ui
-        .scope(|ui| {
-            *ui.visuals_mut() = visuals(dark);
+    with_dark_tokens(&ctx, || {
+        ui.scope(|ui| {
+            *ui.visuals_mut() = visuals(Tokens::dark());
             f(ui)
         })
-        .inner;
+        .inner
+    })
+}
+
+/// Run `f` with [`Tokens::get`] answering the dark tokens (the ui's visuals stay as they are).
+pub fn with_dark_tokens<R>(ctx: &Context, f: impl FnOnce() -> R) -> R {
+    let saved = Tokens::get(ctx);
+    ctx.data_mut(|d| d.insert_temp(tokens_id(), Tokens::dark()));
+    let r = f();
     ctx.data_mut(|d| d.insert_temp(tokens_id(), saved));
     r
+}
+
+/// egui visuals for popup menus, which are dark in both themes: the dark theme's, on the menu
+/// colour (egui fills a popup's frame with `window_fill`).
+pub fn menu_visuals() -> Visuals {
+    let t = Tokens::dark();
+    let mut v = visuals(t);
+    v.window_fill = t.menu;
+    v
 }
 
 /// UI fonts: Inter and the Archivo wordmark (from the craft-fonts build input) when present;

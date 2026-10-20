@@ -171,7 +171,6 @@ fn text_style_params(ids: &[NodeId], range: Option<(NodeId, usize, usize)>, mut 
 
 /// The font rows: family, style and size, line height and letter spacing.
 fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle], editing: bool, apply_style: &dyn Fn(&mut FigApp, &str, Value)) {
-    let t = Tokens::get(ui.ctx());
     let range = figcraft_engine::textedit::selected_range(&app.session);
 
     // Font family.
@@ -199,27 +198,30 @@ fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle]
     row(ui, 32.0, |ui| {
         let resp = widgets::dropdown(ui, fstyle.as_deref().unwrap_or(tr(MIXED)), half, None);
         let fam = family.clone();
-        menu_popup(&resp).width(200.0).show(|ui| match &fam {
-            Some(fam) => {
-                let list = figcraft_text::family_styles(fam);
-                if list.is_empty() {
-                    widgets::label(ui, tr("Font not installed"), t.text_tertiary);
-                }
-                egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
-                    for s in list {
-                        let mark = if fstyle.as_deref() == Some(s.as_str()) { "✓ " } else { "   " };
-                        let (clicked, hovered) = menu_item_hover(ui, &format!("{mark}{s}"));
-                        if clicked {
-                            apply_style(app, "fontStyle", json!(s));
-                            ui.close();
-                        } else if hovered {
-                            // The canvas shows the style (a variable font's named instance too).
-                            app.preview_text(ui.ctx(), "text.style", text_style_params(ids, range, json!({"fontStyle": s})));
-                        }
+        menu_popup(&resp).width(200.0).show(|ui| {
+            let t = Tokens::get(ui.ctx());
+            match &fam {
+                Some(fam) => {
+                    let list = figcraft_text::family_styles(fam);
+                    if list.is_empty() {
+                        widgets::label(ui, tr("Font not installed"), t.text_tertiary);
                     }
-                });
+                    egui::ScrollArea::vertical().max_height(320.0).show(ui, |ui| {
+                        for s in list {
+                            let mark = if fstyle.as_deref() == Some(s.as_str()) { "✓ " } else { "   " };
+                            let (clicked, hovered) = menu_item_hover(ui, &format!("{mark}{s}"));
+                            if clicked {
+                                apply_style(app, "fontStyle", json!(s));
+                                ui.close();
+                            } else if hovered {
+                                // The canvas shows the style (a variable font's named instance too).
+                                app.preview_text(ui.ctx(), "text.style", text_style_params(ids, range, json!({"fontStyle": s})));
+                            }
+                        }
+                    });
+                }
+                None => widgets::label(ui, tr("Pick one font family first"), t.text_tertiary),
             }
-            None => widgets::label(ui, tr("Pick one font family first"), t.text_tertiary),
         });
         let size = uniform(styles, |s| s.font_size);
         ui.spacing_mut().item_spacing.x = 0.0;

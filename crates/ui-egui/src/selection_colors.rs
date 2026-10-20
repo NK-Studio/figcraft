@@ -56,7 +56,6 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
     if colors.len() < 2 {
         return;
     }
-    let t = Tokens::get(ui.ctx());
     widgets::section_header(ui, tr("Selection colors"), &[], false);
     // Bound the panel's height; a document with many distinct colors stays scrollable.
     ui.add_enabled_ui(!interacting, |ui| {
@@ -108,6 +107,7 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, ids: &[NodeId
                         }
                         let styles = icons::button(ui, Icon::Styles, 24.0, false, tr("Color styles"));
                         crate::right::menu_popup(&styles).show(|ui| {
+                            let t = Tokens::get(ui.ctx());
                             let mut any = false;
                             for style in &doc.styles {
                                 if !matches!(style.kind, StyleKind::Paint { .. }) {

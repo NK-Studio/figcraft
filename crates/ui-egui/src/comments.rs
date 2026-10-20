@@ -691,6 +691,7 @@ fn message(
                     tr("Add reaction"),
                 );
                 crate::right::menu_popup(&react).id(menu).show(|ui| {
+                    let t = Tokens::get(ui.ctx());
                     ui.horizontal(|ui| {
                         for e in REACTIONS {
                             let on = m.reacted(e, cx.me);

@@ -1055,6 +1055,7 @@ fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &In
         row(ui, 32.0, |ui| {
             let resp = widgets::dropdown(ui, tr(it.easing.label()), ui.available_width() - 80.0, None);
             menu_popup(&resp).width(220.0).show(|ui| {
+                let t = Tokens::get(ui.ctx());
                 let custom = [Easing::CUSTOM_BEZIER, Easing::CUSTOM_SPRING];
                 for (i, e) in Easing::ALL.iter().chain(custom.iter()).enumerate() {
                     if i == 7 || i == Easing::ALL.len() {
@@ -1065,7 +1066,7 @@ fn animation_rows(app: &mut FigApp, ui: &mut Ui, node: NodeId, k: usize, it: &In
                     if rr.hovered() {
                         ui.painter().rect_filled(r, CornerRadius::same(5), t.menu_hover);
                     }
-                    let col = if rr.hovered() { Color32::WHITE } else { t.text };
+                    let col = t.menu_text;
                     curve(ui.painter(), Rect::from_min_size(pos2(r.min.x + 6.0, r.min.y + 4.0), vec2(28.0, 18.0)), *e, col, None);
                     ui.painter().text(pos2(r.min.x + 42.0, r.center().y), Align2::LEFT_CENTER, tr(e.label()), regular(11.5), col);
                     if rr.clicked() {
