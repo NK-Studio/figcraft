@@ -50,6 +50,7 @@ pub mod proto_editor;
 pub mod proto_panel;
 pub mod render_worker;
 pub mod right;
+pub mod safe_area;
 pub mod scale_panel;
 pub mod section_panel;
 pub mod selection_colors;
@@ -803,7 +804,9 @@ pub struct FigApp {
 pub type Done = Box<dyn FnOnce(&mut FigApp, &egui::Context, Value)>;
 
 impl FigApp {
-    pub fn new(session: Session, services: Box<dyn Services>) -> Self {
+    pub fn new(mut session: Session, services: Box<dyn Services>) -> Self {
+        // Device folders imported before come back (`docs/device-profiles.md`).
+        figcraft_engine::cmd::device::restore_devices(&mut session);
         // The main window's panels open as wide as they were left.
         let (left_width, right_width) = session.prefs.panel_widths;
         let pages_height = session.prefs.pages_height;

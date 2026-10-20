@@ -931,6 +931,9 @@ fn overlays(app: &FigApp, painter: &egui::Painter, t: &Tokens) -> Vec<(NodeId, [
                 }
             }
         }
+        if view.safe_areas && n.device.is_some() {
+            crate::safe_area::draw(app, painter, t, &doc, *c);
+        }
         // The focus view's bar names its frame.
         let labelled = focus.is_none() && (n.kind.is_frame_like() || matches!(n.kind, NodeKind::Section { .. }));
         if labelled && let Some(q) = crate::frame_labels::draw(app, painter, t, &doc, *c, sel.contains(c), ds.hover == Some(*c)) {

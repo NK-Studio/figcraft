@@ -401,6 +401,84 @@ impl NodeKind {
     }
 }
 
+/// A box with a top-left origin.
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BoxRect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// Edges in from a box's sides.
+#[derive(Clone, Copy, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SideInsets {
+    pub top: f64,
+    pub right: f64,
+    pub bottom: f64,
+    pub left: f64,
+}
+
+/// A device screen a frame stands for: what the device profile said when it was chosen, in
+/// points, so the file shows its safe area without the profile (see `docs/device-profiles.md`).
+#[derive(Clone, Debug, PartialEq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct DeviceFrame {
+    /// The profile's id ("unity/apple-iphone-12").
+    pub id: String,
+    pub name: String,
+    /// "portrait", "portraitUpsideDown", "landscapeLeft" or "landscapeRight".
+    pub orientation: String,
+    /// The device screen in this orientation, in points.
+    pub width: f64,
+    pub height: f64,
+    /// The safe area, in from each edge of the screen.
+    pub safe_area: SideInsets,
+    /// Display cutouts, top-left origin.
+    pub cutouts: Vec<BoxRect>,
+    pub corner_radius: f64,
+}
+
+impl DeviceFrame {
+    /// The safe area insets for a `w × h` frame: the stored ones, each kept finite, positive and
+    /// within the frame (a file can say anything).
+    pub fn insets_for(&self, w: f64, h: f64) -> SideInsets {
+        let c = |v: f64, max: f64| if v.is_finite() { v.clamp(0.0, max.max(0.0)) } else { 0.0 };
+        let i = self.safe_area;
+        let top = c(i.top, h);
+        let left = c(i.left, w);
+        SideInsets { top, left, bottom: c(i.bottom, h - top), right: c(i.right, w - left) }
+    }
+
+    /// The cutouts for a `w × h` frame: scaled from the device screen to the frame, finite ones
+    /// only, within the frame, at most 64.
+    pub fn cutouts_for(&self, w: f64, h: f64) -> Vec<BoxRect> {
+        let (sx, sy) = (ratio(w, self.width), ratio(h, self.height));
+        self.cutouts
+            .iter()
+            .take(64)
+            .filter(|r| [r.x, r.y, r.width, r.height].iter().all(|v| v.is_finite()))
+            .filter_map(|r| {
+                let (x0, y0) = ((r.x * sx).clamp(0.0, w), (r.y * sy).clamp(0.0, h));
+                let (x1, y1) = (((r.x + r.width) * sx).clamp(0.0, w), ((r.y + r.height) * sy).clamp(0.0, h));
+                (x1 > x0 && y1 > y0).then_some(BoxRect { x: x0, y: y0, width: x1 - x0, height: y1 - y0 })
+            })
+            .collect()
+    }
+
+    /// The screen's corner radius for a `w × h` frame.
+    pub fn corner_radius_for(&self, w: f64, h: f64) -> f64 {
+        if self.corner_radius.is_finite() { self.corner_radius.clamp(0.0, w.min(h).max(0.0) / 2.0) } else { 0.0 }
+    }
+}
+
+/// `frame / device`, or 1 when the device size is unusable.
+fn ratio(frame: f64, device: f64) -> f64 {
+    if device.is_finite() && device > 0.0 && frame.is_finite() { frame / device } else { 1.0 }
+}
+
 /// One node of the scene graph.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Node {
@@ -518,6 +596,10 @@ pub struct Node {
     /// Dev resources: links for developers (docs, code, tickets…), in the order they were added.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub dev_resources: Vec<DevResource>,
+    /// Frames: the device screen this frame stands for, with its safe area and cutouts
+    /// (`frame.device.set`; drawn while View ▸ Safe areas is on).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceFrame>,
 }
 
 pub(crate) fn yes() -> bool {
@@ -628,6 +710,7 @@ impl Node {
             annotations: Vec::new(),
             code_links: Vec::new(),
             dev_resources: Vec::new(),
+            device: None,
         }
     }
 

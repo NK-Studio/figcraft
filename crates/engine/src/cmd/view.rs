@@ -28,6 +28,7 @@ type Slot = fn(&mut ViewState) -> &mut bool;
 const TOGGLES: &[(&str, Slot, bool)] = &[
     ("view.pixelGrid", |v| &mut v.pixel_grid, true),
     ("view.layoutGrids", |v| &mut v.layout_grids, true),
+    ("view.safeAreas", |v| &mut v.safe_areas, true),
     ("view.rulers", |v| &mut v.rulers, true),
     ("view.slices", |v| &mut v.show_slices, true),
     ("view.comments", |v| &mut v.comments, true),
@@ -265,6 +266,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("view.nextPage", "Next page", "{}", false, |s, _| page_step(s, 1)),
         spec!("view.pixelGrid", "Pixel grid", "{on?}", false, |s, p| toggle(s, p, "view.pixelGrid")),
         spec!("view.layoutGrids", "Layout grids", "{on?}", false, |s, p| toggle(s, p, "view.layoutGrids")),
+        spec!("view.safeAreas", "Safe areas", "{on?} (device frames show their safe area and cutouts)", false, |s, p| toggle(s, p, "view.safeAreas")),
         spec!("view.rulers", "Rulers", "{on?}", false, |s, p| toggle(s, p, "view.rulers")),
         spec!("view.slices", "Slices", "{on?}", false, |s, p| toggle(s, p, "view.slices")),
         spec!("view.comments", "Comments", "{on?}", false, |s, p| toggle(s, p, "view.comments")),

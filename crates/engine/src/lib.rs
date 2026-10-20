@@ -186,6 +186,8 @@ pub struct ViewState {
     pub vh: f64,
     pub pixel_grid: bool,
     pub layout_grids: bool,
+    /// Device frames show their safe area and cutouts (`view.safeAreas`).
+    pub safe_areas: bool,
     pub rulers: bool,
     pub outlines: bool,
     /// Outline mode for the selected layers only (the rest draws normally).
@@ -222,6 +224,7 @@ impl Default for ViewState {
             vh: 800.0,
             pixel_grid: true,
             layout_grids: true,
+            safe_areas: true,
             rulers: false,
             outlines: false,
             outlines_selection: false,
@@ -702,6 +705,10 @@ pub struct Prefs {
     /// `widget:<plugin>`.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub recent_actions: Vec<String>,
+    /// Device files and folders imported with `device.import {path}`, imported again when the app
+    /// starts ([`cmd::device::restore_devices`]), at most [`cmd::device::MAX_SOURCES`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub device_sources: Vec<String>,
 }
 
 /// Recently run actions kept for the Actions palette (newest first).
@@ -739,6 +746,7 @@ impl Default for Prefs {
             home_order: "desc".into(),
             view: BTreeMap::new(),
             recent_actions: Vec::new(),
+            device_sources: Vec::new(),
         }
     }
 }

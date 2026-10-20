@@ -1,7 +1,9 @@
 # Device profiles and safe areas
 
-> **Status:** P1 landed (data model, Unity `.device` importer, `device.*` commands). P2–P5 planned.
-> **Owner area:** `crates/device` (L2), `crates/engine/src/cmd/device.rs` (L5).
+> **Status:** P1 landed (data model, Unity `.device` importer, `device.*` commands); P2 landed
+> (device frames: safe area and cutouts on the canvas). P3–P5 planned.
+> **Owner area:** `crates/device` (L2), `DeviceFrame` in `crates/doc/src/node.rs` (L1),
+> `crates/engine/src/cmd/device.rs` (L5), `crates/ui-egui/src/safe_area.rs` (L6).
 
 ## Goal
 
@@ -111,8 +113,10 @@ imported profile and edit it. Overlay paths in it are resolved relative to the f
 
 ## Engine (`Session::devices`)
 
-A per-session `DeviceRegistry` (ordered map id → profile). P1 keeps it in memory for the session;
-persisting the user's imported devices (prefs) is P2.
+A per-session `DeviceRegistry` (ordered map id → profile). Paths imported with
+`device.import {path}` (without `scale`) are remembered in the preferences (`deviceSources`, at
+most 32) and imported again when the app starts; ones that are gone are skipped quietly, and
+`device.remove {all: true}` forgets them.
 
 | Command | Params | Result |
 |---|---|---|
@@ -121,17 +125,40 @@ persisting the user's imported devices (prefs) is P2.
 | `device.get` | `{id, orientation? ("portrait"…/1–4), screen? (0)}` | size, safe area and insets in px and pt, cutouts, scale, overlay |
 | `device.export` | `{id, path?}` | the profile as `figcraft-device` JSON (written to `path` when given) |
 | `device.remove` | `{id}` / `{all: true}` | `{removed: n}` |
+| `frame.device.set` | `{ids?, device, orientation?, screen?, resize? (true)}` | `{ids, device, orientation, width, height}`: the frames take the device's size in points and keep a `DeviceFrame` |
+| `frame.device.clear` | `{ids?}` | `{cleared: n}` |
+| `view.safeAreas` | `{on?}` | View ▸ Safe areas (on by default; kept in the preferences like the other View toggles) |
 
-None of them edit the document, so none is an undo step. File access goes through
+The `device.*` commands don't edit the document, so none is an undo step; `frame.device.set` and
+`frame.device.clear` are (one step each, resize included). File access goes through
 `file_access` (automation roots apply). Folder imports read at most 512 files.
+
+## Device frames (P2)
+
+A frame stands for a device screen through `Node::device: Option<DeviceFrame>` (saved with the
+file and synced in live sessions like any other layer property). `DeviceFrame` is a **snapshot in
+points** taken from the profile when the device is chosen: id, name, orientation, the screen's
+size, safe-area insets, cutouts and corner radius. So a file shows its safe areas on any machine,
+without the profile or Unity installed.
+
+- **Canvas** (`safe_area.rs`, while View ▸ Safe areas is on): the bands outside the safe area are
+  tinted with the theme's danger colour, the safe area's edge is dashed, cutouts are filled and the
+  screen's rounded corners are outlined. It's drawn in the frame's own coordinates, so it turns with
+  a rotated frame. Insets stay in points from each edge when a frame is resized to another size;
+  cutouts scale with the frame. Every stored number is checked (finite, clamped into the frame,
+  at most 64 cutouts) before drawing: a file can say anything.
+- **Right panel**: the frame type dropdown lists the imported devices under *Devices* (their
+  portrait size), then *Clear device* when a selected frame has one, and *Import devices…* (a
+  folder picker; the folder is remembered).
+- **Orientation**: `frame.swapOrientation` turns a device frame's snapshot too (portrait, else
+  upside down ⇄ landscape left, else right) when the profile is imported; otherwise it drops the
+  device with a message, since the turned safe area isn't known.
 
 ## Phases
 
-- **P1 — data model + Unity importer** (this change): `crates/device`, `device.*` commands, tests
+- **P1 — data model + Unity importer** (landed): `crates/device`, `device.*` commands, tests
   with synthetic fixtures, junk-parameter sweep coverage.
-- **P2 — frames know their device**: `frame.device.set {id, device, orientation}` stores a device
-  reference on a frame; the canvas draws the safe area, cutouts and corner radius over that frame
-  (toggle in View); switching orientation rotates the frame; registry persisted in prefs.
+- **P2 — frames know their device** (landed): see [Device frames](#device-frames-p2).
 - **P3 — multi-device check**: resize a frame (constraints + auto layout re-run) to each chosen
   device side by side; "outside safe area" warnings for layers whose bounds cross the insets; safe
   area as layout guides.

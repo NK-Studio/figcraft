@@ -178,10 +178,11 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
                 ui.close();
             }
         }
-        let toggles: [(&str, &str, bool); 5] = [
+        let toggles: [(&str, &str, bool); 6] = [
             (tr("Pixel grid"), "view.pixelGrid", v.pixel_grid),
             (tr("Snap to pixel grid"), "view.snapPixel", v.snap_pixel),
             (tr("Layout grids"), "view.layoutGrids", v.layout_grids),
+            (tr("Safe areas"), "view.safeAreas", v.safe_areas),
             (tr("Rulers"), "view.rulers", v.rulers),
             (tr("Outlines"), "view.outlines", v.outlines),
         ];
@@ -504,6 +505,19 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
             app.run("frame.swapOrientation", json!({"ids": sel}));
         }
         let ids: Vec<NodeId> = sel.to_vec();
+        // Imported devices (their portrait size, or the first orientation they list) and whether a
+        // selected frame stands for one.
+        let devices: Vec<(String, String, f64, f64)> = app
+            .session
+            .devices
+            .iter()
+            .filter_map(|d| {
+                let sc = d.screen(0)?;
+                let (w, h) = sc.size_pt(*sc.supported().first()?);
+                Some((d.id.clone(), d.name.clone(), w, h))
+            })
+            .collect();
+        let has_device = sel.iter().any(|i| doc.node(*i).is_some_and(|n| n.device.is_some()));
         menu_popup(&resp).width(260.0).show(|ui| {
             egui::ScrollArea::vertical().max_height(420.0).show(ui, |ui| {
                 kind_items(app, ui, true);
@@ -518,6 +532,30 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                         app.set_props(&ids, json!({"width": pw, "height": ph}));
                         ui.close();
                     }
+                }
+                ui.separator();
+                ui.label(egui::RichText::new(tr("Devices")).font(semibold(11.0)).color(t.text_secondary));
+                for (id, name, w, h) in &devices {
+                    let size = |v: f64| (v * 10.0).round() / 10.0;
+                    if menu_item(ui, name, &format!("{}×{}", size(*w), size(*h))) {
+                        app.run("frame.device.set", json!({"ids": ids, "device": id}));
+                        ui.close();
+                    }
+                }
+                if has_device && menu_item(ui, tr("Clear device"), "") {
+                    app.run("frame.device.clear", json!({"ids": ids}));
+                    ui.close();
+                }
+                if menu_item(ui, tr("Import devices…"), "") {
+                    ui.close();
+                    app.pick_folder(tr("Import devices…"), |app, dir| {
+                        if let Some(r) = app.run("device.import", json!({"path": dir.to_string_lossy()})) {
+                            let n = r["imported"].as_array().map_or(0, Vec::len);
+                            app.toast(trn("Imported {n} devices", n, &[]));
+                            // The folder is imported again at the next start.
+                            app.services.save_prefs(&app.session.prefs);
+                        }
+                    });
                 }
             });
         });

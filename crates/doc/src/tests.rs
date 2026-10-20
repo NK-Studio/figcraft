@@ -464,3 +464,29 @@ fn text_style_empty_range_links_and_unlinks_all() {
     e.unlink_text_style(0, 0);
     assert!(e.style.style_id.is_none());
 }
+
+#[test]
+fn device_frame_geometry_is_kept_within_the_frame() {
+    use crate::{BoxRect, DeviceFrame, SideInsets};
+    let d = DeviceFrame {
+        width: 400.0,
+        height: 800.0,
+        safe_area: SideInsets { top: 50.0, right: f64::NAN, bottom: 1e9, left: -5.0 },
+        cutouts: vec![
+            BoxRect { x: 100.0, y: 0.0, width: 200.0, height: 30.0 },
+            BoxRect { x: f64::INFINITY, y: 0.0, width: 1.0, height: 1.0 },
+            BoxRect { x: 500.0, y: 0.0, width: 10.0, height: 10.0 },
+        ],
+        corner_radius: 1e9,
+        ..Default::default()
+    };
+    let i = d.insets_for(200.0, 400.0);
+    assert_eq!((i.top, i.right, i.bottom, i.left), (50.0, 0.0, 350.0, 0.0));
+    // Cutouts scale with the frame; non-finite and off-frame ones go.
+    let c = d.cutouts_for(200.0, 400.0);
+    assert_eq!(c, vec![BoxRect { x: 50.0, y: 0.0, width: 100.0, height: 15.0 }]);
+    assert_eq!(d.corner_radius_for(200.0, 400.0), 100.0);
+    let junk = DeviceFrame { width: 0.0, height: f64::NAN, corner_radius: f64::NAN, ..d };
+    assert_eq!(junk.cutouts_for(400.0, 800.0).len(), 1, "an unusable device size scales by 1");
+    assert_eq!(junk.corner_radius_for(10.0, 10.0), 0.0);
+}

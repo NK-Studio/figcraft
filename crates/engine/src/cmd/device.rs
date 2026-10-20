@@ -6,6 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use figcraft_device::{DeviceProfile, Insets, Orientation, ParseHint, Platform, PxRect, Screen, native};
+use figcraft_doc::{BoxRect, DeviceFrame, NodeId, SideInsets};
 use serde_json::{Value, json};
 
 use crate::cmd::CommandSpec;
@@ -14,6 +15,8 @@ use crate::{EngineError, Result, Session, bad, file_access, spec};
 
 /// Files a folder import reads at most.
 const MAX_FOLDER_FILES: usize = 512;
+/// Imported paths the preferences remember.
+pub const MAX_SOURCES: usize = 32;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
@@ -45,7 +48,21 @@ pub fn specs() -> Vec<CommandSpec> {
             false,
             device_export
         ),
-        spec!("device.remove", "Remove Device", "{id} | {all: true} → {removed: n}", false, device_remove),
+        spec!(
+            "device.remove",
+            "Remove Device",
+            "{id} | {all: true (also forgets the files and folders imported again at start-up)} → {removed: n}",
+            false,
+            device_remove
+        ),
+        spec!(
+            "frame.device.set",
+            "Set Frame Device",
+            "{ids? (frames; default the selection), device (an id from device.list), orientation? (default the device's first), screen? (default 0), resize? (default true: the frames take the device's size in points)} → {ids, device, orientation, width, height}",
+            true,
+            frame_device_set
+        ),
+        spec!("frame.device.clear", "Clear Frame Device", "{ids? (default the selection)}", true, frame_device_clear),
     ]
 }
 
@@ -87,23 +104,54 @@ fn device_import(s: &mut Session, p: &Value) -> Result<Value> {
         Some(v) => Some(params::f64_of(v).filter(|k| (0.1..=10.0).contains(k)).ok_or_else(|| bad(CMD, "`scale` must be a number from 0.1 to 10"))?),
     };
     let replace = params::boolean(p, "replace").unwrap_or(true);
-    let mut imported = Vec::new();
-    let mut skipped = Vec::new();
     if let Some(text) = get(p, "text").and_then(Value::as_str) {
         let profile = figcraft_device::parse(text.as_bytes(), &hint_for(None, scale)).map_err(|e| device_err(CMD, e))?;
-        imported.push(insert(s, profile, replace)?);
-        return Ok(json!({"imported": imported, "skipped": skipped}));
+        return Ok(json!({"imported": [insert(s, profile, replace)?], "skipped": []}));
     }
     let Some(path) = get(p, "path").and_then(Value::as_str).filter(|p| !p.trim().is_empty()) else {
         return Err(bad(CMD, "give `path` (a device file or folder) or `text`"));
     };
     let path = PathBuf::from(path);
-    if !file_access::is_dir(&path) {
-        let profile = read_one(&path, scale).map_err(|e| bad(CMD, e))?;
+    let r = import_path(s, &path, scale, replace)?;
+    if scale.is_none() && r["imported"].as_array().is_some_and(|a| !a.is_empty()) {
+        remember_source(s, &path);
+    }
+    Ok(r)
+}
+
+/// Keep `path` (made absolute) in the preferences' device sources, newest last.
+fn remember_source(s: &mut Session, path: &Path) {
+    let p = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned();
+    let sources = &mut s.prefs.device_sources;
+    sources.retain(|q| *q != p);
+    sources.push(p);
+    let over = sources.len().saturating_sub(MAX_SOURCES);
+    sources.drain(..over);
+}
+
+/// Import the devices of the files and folders the preferences remember (at start-up); ones that
+/// are gone or unreadable are skipped quietly. Returns how many devices were imported.
+pub fn restore_devices(s: &mut Session) -> usize {
+    let sources = s.prefs.device_sources.clone();
+    let mut n = 0;
+    for src in sources.iter().take(MAX_SOURCES) {
+        if let Ok(r) = import_path(s, Path::new(src), None, true) {
+            n += r["imported"].as_array().map_or(0, Vec::len);
+        }
+    }
+    n
+}
+
+fn import_path(s: &mut Session, path: &Path, scale: Option<f64>, replace: bool) -> Result<Value> {
+    const CMD: &str = "device.import";
+    let mut imported = Vec::new();
+    let mut skipped = Vec::new();
+    if !file_access::is_dir(path) {
+        let profile = read_one(path, scale).map_err(|e| bad(CMD, e))?;
         imported.push(insert(s, profile, replace)?);
         return Ok(json!({"imported": imported, "skipped": skipped}));
     }
-    let files = folder_files(&path)?;
+    let files = folder_files(path)?;
     if files.is_empty() {
         return Err(bad(CMD, format!("no `.device` or `{}` files in {}", native::EXTENSION, path.display())));
     }
@@ -241,8 +289,100 @@ fn device_export(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn device_remove(s: &mut Session, p: &Value) -> Result<Value> {
     if params::boolean(p, "all") == Some(true) {
+        // Forget the remembered sources too, so they don't come back at the next start.
+        s.prefs.device_sources.clear();
         return Ok(json!({"removed": s.devices.clear()}));
     }
     let id = params::req_string("device.remove", p, "id")?;
     Ok(json!({"removed": usize::from(s.devices.remove(&id))}))
+}
+
+/// What a frame keeps of device `d`'s screen `index` in orientation `o`, in points.
+fn frame_snapshot(d: &DeviceProfile, sc: &Screen, o: Orientation) -> DeviceFrame {
+    let (width, height) = sc.size_pt(o);
+    let i = sc.insets_pt(o).unwrap_or_default();
+    DeviceFrame {
+        id: d.id.clone(),
+        name: d.name.clone(),
+        orientation: o.name().into(),
+        width: r4(width),
+        height: r4(height),
+        safe_area: SideInsets { top: r4(i.top), right: r4(i.right), bottom: r4(i.bottom), left: r4(i.left) },
+        cutouts: sc.cutouts_pt(o).iter().map(|c| BoxRect { x: r4(c.x), y: r4(c.y), width: r4(c.width), height: r4(c.height) }).collect(),
+        corner_radius: r4(sc.corner_radius_px / sc.scale),
+    }
+}
+
+fn frame_targets(cmd: &str, s: &Session, p: &Value) -> Result<Vec<NodeId>> {
+    let ids = params::req_targets(cmd, s, p)?;
+    let doc = s.doc()?;
+    if let Some(i) = ids.iter().find(|i| !doc.node(**i).is_some_and(|n| n.kind.is_frame_like())) {
+        return Err(bad(cmd, format!("{i} is not a frame")));
+    }
+    Ok(ids)
+}
+
+fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
+    const CMD: &str = "frame.device.set";
+    let ids = frame_targets(CMD, s, p)?;
+    let device = params::req_string(CMD, p, "device")?;
+    let d = s.devices.get(&device).cloned().ok_or_else(|| bad(CMD, format!("no device `{device}` (see device.list; import with device.import)")))?;
+    let index = match get(p, "screen") {
+        None => 0,
+        Some(_) => params::req_index(CMD, p, "screen")?,
+    };
+    let sc = d.screen(index).ok_or_else(|| bad(CMD, format!("`screen` must be below {}", d.screens.len())))?;
+    let supported = sc.supported();
+    let o = match params::string(p, "orientation") {
+        None => *supported.first().ok_or_else(|| bad(CMD, "the device lists no orientations"))?,
+        Some(name) => Orientation::parse(&name).filter(|o| supported.contains(o)).ok_or_else(|| {
+            bad(CMD, format!("orientation must be one {} supports: {}", d.name, supported.iter().map(|o| o.name()).collect::<Vec<_>>().join(", ")))
+        })?,
+    };
+    let snap = frame_snapshot(&d, sc, o);
+    if params::boolean(p, "resize").unwrap_or(true) {
+        for i in &ids {
+            super::arrange::resize_cmd(s, &json!({"ids": [i], "width": snap.width, "height": snap.height}))?;
+        }
+    }
+    let doc = s.doc_mut()?;
+    for i in &ids {
+        doc.get_mut(*i)?.device = Some(snap.clone());
+    }
+    Ok(json!({"ids": ids, "device": snap.id, "orientation": snap.orientation, "width": snap.width, "height": snap.height}))
+}
+
+fn frame_device_clear(s: &mut Session, p: &Value) -> Result<Value> {
+    let ids = params::req_targets("frame.device.clear", s, p)?;
+    let doc = s.doc_mut()?;
+    let mut cleared = 0;
+    for i in &ids {
+        if doc.get_mut(*i)?.device.take().is_some() {
+            cleared += 1;
+        }
+    }
+    Ok(json!({"cleared": cleared}))
+}
+
+/// After frame `id` turned between portrait and landscape (`frame.swapOrientation`): its device
+/// takes the turned orientation (portrait, else upside down; landscape left, else right), or is
+/// dropped when the profile isn't imported or doesn't support one.
+pub(crate) fn turn_frame_device(s: &mut Session, id: NodeId) -> Result<()> {
+    let Some(df) = s.doc()?.node(id).and_then(|n| n.device.clone()) else { return Ok(()) };
+    let was_landscape = Orientation::parse(&df.orientation).is_some_and(Orientation::is_landscape);
+    let wanted = if was_landscape {
+        [Orientation::Portrait, Orientation::PortraitUpsideDown]
+    } else {
+        [Orientation::LandscapeLeft, Orientation::LandscapeRight]
+    };
+    let snap = s.devices.get(&df.id).and_then(|d| {
+        let sc = d.screen(0)?;
+        let o = wanted.into_iter().find(|o| sc.info(*o).is_some())?;
+        Some(frame_snapshot(d, sc, o))
+    });
+    if snap.is_none() {
+        s.message = Some(format!("{}: device dropped (import it again to keep its safe area when turning)", df.name));
+    }
+    s.doc_mut()?.get_mut(id)?.device = snap;
+    Ok(())
 }

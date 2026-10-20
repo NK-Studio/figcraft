@@ -116,3 +116,108 @@ fn import_refusals() {
     assert!(s.execute("device.list", &json!({"platform": "palm"})).is_err());
     assert_eq!(s.devices.len(), 0);
 }
+
+fn node_id(v: &Value) -> figcraft_doc::NodeId {
+    v["id"].as_str().map(|s| s.parse().unwrap()).or_else(|| v["id"].as_u64().map(figcraft_doc::NodeId)).unwrap()
+}
+
+fn session_with_device(name: &str) -> (Session, figcraft_doc::NodeId) {
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"text": unity_device(name).to_string()})).unwrap();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    (s, f)
+}
+
+#[test]
+fn frame_takes_device_size_and_safe_area_in_one_undo_step() {
+    let (mut s, f) = session_with_device("Test Phone");
+    let r = s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone"})).unwrap();
+    assert_eq!((r["orientation"].clone(), r["width"].clone(), r["height"].clone()), (json!("portrait"), json!(400.0), json!(866.6667)));
+    let n = s.doc().unwrap().node(f).unwrap().clone();
+    assert_eq!((n.width, n.height), (400.0, 866.6667));
+    let d = n.device.clone().unwrap();
+    assert_eq!((d.safe_area.top, d.safe_area.bottom, d.corner_radius), (50.0, 30.0, 40.0));
+    assert_eq!(d.cutouts.len(), 1);
+    assert_eq!((d.cutouts[0].x, d.cutouts[0].width, d.cutouts[0].height), (100.0, 200.0, 30.0));
+    // node.get reports it.
+    let g = s.execute("node.get", &json!({"id": f})).unwrap();
+    assert_eq!(g["device"]["id"], "unity/test-phone");
+    // One undo step puts the size back and drops the device.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let n = s.doc().unwrap().node(f).unwrap();
+    assert_eq!((n.width, n.height, n.device.is_none()), (100.0, 100.0, true));
+    // Without resizing, the frame keeps its size.
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone", "orientation": "landscapeLeft", "resize": false})).unwrap();
+    let n = s.doc().unwrap().node(f).unwrap();
+    assert_eq!((n.width, n.device.as_ref().unwrap().orientation.as_str()), (100.0, "landscapeLeft"));
+    assert_eq!(s.execute("frame.device.clear", &json!({"ids": [f]})).unwrap()["cleared"], 1);
+    assert!(s.doc().unwrap().node(f).unwrap().device.is_none());
+}
+
+#[test]
+fn frame_device_refusals() {
+    let (mut s, f) = session_with_device("Test Phone");
+    let rect = node_id(&s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap());
+    assert!(s.execute("frame.device.set", &json!({"ids": [rect], "device": "unity/test-phone"})).unwrap_err().to_string().contains("not a frame"));
+    assert!(s.execute("frame.device.set", &json!({"ids": [f], "device": "nope"})).is_err());
+    let e =
+        s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone", "orientation": "landscapeRight"})).unwrap_err().to_string();
+    assert!(e.contains("portrait, landscapeLeft"), "{e}");
+    assert!(s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone", "screen": 3})).is_err());
+    assert!(s.doc().unwrap().node(f).unwrap().device.is_none());
+}
+
+#[test]
+fn swapping_orientation_turns_the_device() {
+    let (mut s, f) = session_with_device("Test Phone");
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone"})).unwrap();
+    s.execute("frame.swapOrientation", &json!({"ids": [f]})).unwrap();
+    let n = s.doc().unwrap().node(f).unwrap();
+    let d = n.device.as_ref().unwrap();
+    assert_eq!((n.width, n.height), (866.6667, 400.0));
+    assert_eq!((d.orientation.as_str(), d.safe_area.left, d.safe_area.right, d.safe_area.bottom), ("landscapeLeft", 50.0, 50.0, 21.0));
+    s.execute("frame.swapOrientation", &json!({"ids": [f]})).unwrap();
+    assert_eq!(s.doc().unwrap().node(f).unwrap().device.as_ref().unwrap().orientation, "portrait");
+    // Without the profile the device can't turn, so it's dropped.
+    s.execute("device.remove", &json!({"all": true})).unwrap();
+    s.execute("frame.swapOrientation", &json!({"ids": [f]})).unwrap();
+    assert!(s.doc().unwrap().node(f).unwrap().device.is_none());
+}
+
+#[test]
+fn device_frames_survive_saving() {
+    let (mut s, f) = session_with_device("Test Phone");
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone"})).unwrap();
+    let doc = s.doc().unwrap().clone();
+    let back: figcraft_doc::Document = serde_json::from_value(serde_json::to_value(&doc).unwrap()).unwrap();
+    assert_eq!(back.node(f).unwrap().device, doc.node(f).unwrap().device);
+}
+
+#[test]
+fn safe_areas_toggle_is_kept() {
+    let mut s = Session::new();
+    assert_eq!(s.execute("view.safeAreas", &json!({})).unwrap()["on"], false);
+    assert_eq!(s.prefs.view.get("view.safeAreas"), Some(&false));
+    assert_eq!(s.execute("view.safeAreas", &json!({"on": true})).unwrap()["on"], true);
+}
+
+#[test]
+fn imported_folders_come_back_at_start_up() {
+    let dir = temp_dir("restore");
+    std::fs::write(dir.join("R Phone.device"), unity_device("R Phone").to_string()).unwrap();
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"path": dir.to_string_lossy()})).unwrap();
+    s.execute("device.import", &json!({"path": dir.to_string_lossy()})).unwrap();
+    assert_eq!(s.prefs.device_sources.len(), 1, "remembered once");
+    let mut next = Session::new();
+    next.prefs = s.prefs.clone();
+    assert_eq!(crate::cmd::device::restore_devices(&mut next), 1);
+    assert!(next.devices.get("unity/r-phone").is_some());
+    // Gone folders are skipped quietly; removing every device forgets them.
+    let _ = std::fs::remove_dir_all(&dir);
+    let mut later = Session::new();
+    later.prefs = s.prefs.clone();
+    assert_eq!(crate::cmd::device::restore_devices(&mut later), 0);
+    s.execute("device.remove", &json!({"all": true})).unwrap();
+    assert!(s.prefs.device_sources.is_empty());
+}

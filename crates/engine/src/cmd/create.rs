@@ -93,6 +93,7 @@ pub fn specs() -> Vec<CommandSpec> {
             let sizes: Vec<(NodeId, f64, f64)> = ids.iter().filter_map(|i| doc.node(*i).map(|n| (*i, n.width, n.height))).collect();
             for (i, w, h) in sizes {
                 super::arrange::resize_cmd(s, &json!({"ids": [i], "width": h, "height": w}))?;
+                super::device::turn_frame_device(s, i)?;
             }
             ok()
         }),
