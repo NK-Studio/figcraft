@@ -12,8 +12,8 @@ pub mod scripts;
 mod tests;
 
 pub use check::{CheckOptions, Issue, Severity, check};
-pub use export::{Bake, Export, ImageFile, UitkDocument, export};
-pub use layer::{LayerInfo, Position, file_options, implied_pivot, layer_info};
+pub use export::{Bake, Export, ExportOptions, ImageFile, UitkDocument, export};
+pub use layer::{LayerInfo, Position, file_export_options, file_options, implied_pivot, layer_info};
 
 use serde::{Serialize, Serializer};
 

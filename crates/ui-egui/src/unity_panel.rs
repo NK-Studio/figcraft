@@ -43,6 +43,12 @@ pub fn file_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
             }
         });
     }
+    let fixed = figcraft_uitk::file_export_options(doc).fixed_text_boxes;
+    row(ui, 28.0, |ui| {
+        if widgets::checkbox(ui, fixed, tr("Keep FigCraft's text box sizes")) {
+            app.run("unity.settings.set", json!({"fixedTextBoxes": !fixed}));
+        }
+    });
     let Ok(page) = app.session.page() else { return };
     issues(app, ui, doc, &[page]);
     export_button(app, ui, None);

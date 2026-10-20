@@ -19,11 +19,17 @@ pub fn specs() -> Vec<CommandSpec> {
             false,
             unity_check
         ),
-        spec!("unity.settings", "Unity Settings", "{} → {version, grid, versions (the ones the feature table knows)}", false, unity_settings),
+        spec!(
+            "unity.settings",
+            "Unity Settings",
+            "{} → {version, grid, fixedTextBoxes, versions (the ones the feature table knows)}",
+            false,
+            unity_settings
+        ),
         spec!(
             "unity.settings.set",
             "Set Unity Settings",
-            "{version? (\"6.0\"…), grid? (the Unity project enables UITK's experimental grid layout)} → the file's settings",
+            "{version? (\"6.0\"…), grid? (the Unity project enables UITK's experimental grid layout), fixedTextBoxes? (exports give labels FigCraft's text box size)} → the file's settings",
             true,
             unity_settings_set
         ),
@@ -37,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.exportUitk",
             "Export to Unity UI Toolkit",
-            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity scripts into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write FigcraftPanelScale.cs and FigcraftSafeArea.cs, default true)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
+            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity scripts into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write FigcraftPanelScale.cs and FigcraftSafeArea.cs, default true)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
             false,
             file_export_uitk
         ),
@@ -83,8 +89,10 @@ fn unity_check(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn settings_json(s: &Session) -> Result<Value> {
-    let o = figcraft_uitk::file_options(s.doc()?);
-    Ok(json!({"version": o.version, "grid": o.grid_enabled, "versions": UnityVersion::known().collect::<Vec<_>>()}))
+    let o = figcraft_uitk::file_export_options(s.doc()?);
+    Ok(
+        json!({"version": o.check.version, "grid": o.check.grid_enabled, "fixedTextBoxes": o.fixed_text_boxes, "versions": UnityVersion::known().collect::<Vec<_>>()}),
+    )
 }
 
 fn unity_settings(s: &mut Session, _: &Value) -> Result<Value> {
@@ -93,14 +101,18 @@ fn unity_settings(s: &mut Session, _: &Value) -> Result<Value> {
 
 fn unity_settings_set(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "unity.settings.set";
-    let mut o = figcraft_uitk::file_options(s.doc()?);
+    let mut o = figcraft_uitk::file_export_options(s.doc()?);
     if let Some(v) = get(p, "version") {
-        o.version = version_of(CMD, v)?;
+        o.check.version = version_of(CMD, v)?;
     }
     if let Some(g) = get(p, "grid") {
-        o.grid_enabled = params::bool_of(g).ok_or_else(|| bad(CMD, "`grid` must be a boolean"))?;
+        o.check.grid_enabled = params::bool_of(g).ok_or_else(|| bad(CMD, "`grid` must be a boolean"))?;
     }
-    s.doc_mut()?.unity = Some(UnitySettings { version: o.version.to_string(), grid: o.grid_enabled });
+    if let Some(f) = get(p, "fixedTextBoxes") {
+        o.fixed_text_boxes = params::bool_of(f).ok_or_else(|| bad(CMD, "`fixedTextBoxes` must be a boolean"))?;
+    }
+    s.doc_mut()?.unity =
+        Some(UnitySettings { version: o.check.version.to_string(), grid: o.check.grid_enabled, fixed_text_boxes: o.fixed_text_boxes });
     settings_json(s)
 }
 
@@ -211,7 +223,14 @@ fn export_frames(s: &Session, p: &Value) -> Result<Vec<NodeId>> {
 
 fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "file.exportUitk";
-    let mut opts = figcraft_uitk::file_options(s.doc()?);
+    let file = figcraft_uitk::file_export_options(s.doc()?);
+    let mut opts = file.check;
+    let fixed_text_boxes = match params::string(p, "textBoxes").as_deref() {
+        None => file.fixed_text_boxes,
+        Some("fixed") => true,
+        Some("auto") => false,
+        Some(_) => return Err(bad(CMD, "`textBoxes` must be fixed or auto")),
+    };
     if let Some(v) = get(p, "version") {
         opts.version = version_of(CMD, v)?;
     }
@@ -233,7 +252,7 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         return Err(bad(CMD, "no top-level frames to export (select one, or pass `ids`)"));
     }
     let doc = s.doc()?;
-    let ex = figcraft_uitk::export(doc, &frames, opts);
+    let ex = figcraft_uitk::export(doc, &frames, figcraft_uitk::ExportOptions { check: opts, fixed_text_boxes });
     let count = |sev: Severity| ex.issues.iter().filter(|i| i.severity == sev).count();
     let counts = json!({"error": count(Severity::Error), "warning": count(Severity::Warning), "info": count(Severity::Info)});
     let documents: Vec<Value> = ex

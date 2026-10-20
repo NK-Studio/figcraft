@@ -86,6 +86,11 @@ pub fn layer_info(doc: &Document, id: NodeId) -> Option<LayerInfo> {
     })
 }
 
+/// The export options a file asks for (its check options and text box rule).
+pub fn file_export_options(doc: &Document) -> crate::ExportOptions {
+    crate::ExportOptions { check: file_options(doc), fixed_text_boxes: doc.unity.as_ref().is_some_and(|u| u.fixed_text_boxes) }
+}
+
 /// The check options a file asks for (its Unity settings; Unity 6.0 without grid by default, or
 /// when the stored version can't be read).
 pub fn file_options(doc: &Document) -> CheckOptions {

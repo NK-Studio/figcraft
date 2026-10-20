@@ -231,3 +231,30 @@ fn junk_values_never_panic() {
     let e = export(&d, &[f], opts(7));
     assert!(!e.documents[0].uss.contains("NaN") && !e.documents[0].uss.contains("inf"), "{}", e.documents[0].uss);
 }
+
+#[test]
+fn fixed_text_boxes_keep_figcrafts_size() {
+    let (mut d, f) = screen();
+    let free = d.create(f, NodeKind::Text(TextData::new("Free")), "Free", 10.0, 10.0, 46.0, 24.0).unwrap();
+    let row = d.create(f, NodeKind::Frame, "Row", 0.0, 100.0, 300.0, 40.0).unwrap();
+    d.get_mut(row).unwrap().layout = Some(AutoLayout { mode: LayoutMode::Horizontal, ..Default::default() });
+    let hug = d.create(row, NodeKind::Text(TextData::new("Hug")), "Hug", 0.0, 0.0, 30.0, 24.0).unwrap();
+    {
+        let n = d.get_mut(hug).unwrap();
+        n.child_layout.sizing_h = Sizing::Hug;
+        n.child_layout.sizing_v = Sizing::Hug;
+    }
+    let fill = d.create(row, NodeKind::Text(TextData::new("Fill")), "Fill", 0.0, 0.0, 30.0, 24.0).unwrap();
+    d.get_mut(fill).unwrap().child_layout.sizing_h = Sizing::Fill;
+    // Auto: the labels size themselves.
+    let e = export(&d, &[f], opts(6));
+    assert!(!rule(&e, free).contains("width:") && !rule(&e, hug).contains("width:"));
+    // Fixed: FigCraft's box, except along a fill axis.
+    let e = export(&d, &[f], ExportOptions { check: opts(6), fixed_text_boxes: true });
+    for id in [free, hug] {
+        let r = rule(&e, id);
+        assert!(r.contains("width: ") && has(&r, "height: 24px;"), "{r}");
+    }
+    let r = rule(&e, fill);
+    assert!(!r.contains("width:") && has(&r, "flex-grow: 1;") && has(&r, "height: 24px;"), "{r}");
+}

@@ -212,6 +212,9 @@ pub struct UnitySettings {
     pub version: String,
     /// The Unity project turns on UI Toolkit's experimental grid layout (6.7+).
     pub grid: bool,
+    /// Exports give labels FigCraft's text box size instead of letting Unity's font metrics size
+    /// them (the layout matches exactly; text that changes at run time doesn't resize).
+    pub fixed_text_boxes: bool,
 }
 
 impl Default for Document {

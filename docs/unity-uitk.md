@@ -3,7 +3,7 @@
 > **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`); U2 landed (file
 > settings, layer position and pivot, the right panel's Unity section); U3 landed (UXML/USS
 > export, version-aware conversions, SafeArea container, Unity scripts); U4 run on Unity 6.6
-> (layout matches on 5 devices, text aside). U5 planned.
+> (layout matches on 5 devices: 75/75 with fixed text boxes). U5 planned.
 > **Owner area:** `crates/uitk` (L2), `UnitySettings` / `Pivot` in `crates/doc` (L1),
 > `crates/engine/src/cmd/unity.rs` (L5), `crates/ui-egui/src/unity_panel.rs` (L6).
 > **Related:** [`device-profiles.md`](device-profiles.md) (devices, safe areas, device frames).
@@ -151,8 +151,9 @@ updated with what Unity actually does.
 
 ## Unity data in the file (U2)
 
-- **File:** `Document::unity: Option<UnitySettings {version, grid}>` — the target Unity version
-  and whether the project turns on UITK's experimental grid layout. Saved with the file and synced
+- **File:** `Document::unity: Option<UnitySettings {version, grid, fixedTextBoxes}>` — the target
+  Unity version, whether the project turns on UITK's experimental grid layout, and whether exports
+  give labels FigCraft's text box size. Saved with the file and synced
   in live sessions (`DocProp::Unity`). `unity.check` uses it unless told otherwise.
 - **Position** isn't stored separately: it follows from the structure, as UITK's does. A
   top-level frame is the panel's **root**; a layer in an auto layout frame is **relative** unless it
@@ -164,13 +165,14 @@ updated with what Unity actually does.
 
 | Command | Params | Result |
 |---|---|---|
-| `unity.settings` | `{}` | `{version, grid, versions}` |
-| `unity.settings.set` | `{version?, grid?}` (undo step) | the settings |
+| `unity.settings` | `{}` | `{version, grid, fixedTextBoxes, versions}` |
+| `unity.settings.set` | `{version?, grid?, fixedTextBoxes?}` (undo step) | the settings |
 | `unity.layer` | `{id}` | `{position, inAutoLayout, pivot, pivotSet, anchorH, anchorV}` |
 | `unity.layer.set` | `{ids?, pivot? ([x, y], {x, y}, a name like "center", or null), position? ("relative" \| "absolute")}` (undo step) | `{ids}` |
 
 **Right panel:** with nothing selected, *Unity UI Toolkit* shows the target version (a dropdown,
-6.0 to the newest the table knows), the experimental grid checkbox from 6.7, and the page's check
+6.0 to the newest the table knows), the experimental grid checkbox from 6.7, *Keep FigCraft's text
+box sizes*, and the page's check
 counts with the first issues. With layers selected, it shows the first layer's position (a
 Relative/Absolute switch inside auto layout), for absolute layers the 9-point pivot picker (the
 pivot as numbers, whether it comes from the constraints or the layer, Reset), and the selection's
@@ -178,7 +180,7 @@ counts and issues; clicking an issue selects its layer. Results are cached per d
 
 ## Export (U3)
 
-`file.exportUitk {ids?, dir?, version?, grid?, scale?, scripts?}` exports top-level frames (the
+`file.exportUitk {ids?, dir?, version?, grid?, textBoxes?, scale?, scripts?}` exports top-level frames (the
 given ones' top-level frames, else the selection's, else every one on the page; frames in
 sections count). Without `dir` it returns the UXML and USS as text (agents, tests); with `dir` it
 writes, and the Design tab's Unity section has *Export to Unity…* (a folder picker):
@@ -197,6 +199,12 @@ writes, and the Design tab's Unity section has *Export to Unity…* (a folder pi
 `VisualElement` with their baked PNG as `background-image`. `name` is the layer name; hidden layers
 are `display: none`; locked ones `picking-mode="Ignore"`. The root fills the panel
 (`position: absolute; left/top/right/bottom: 0`).
+
+**Text boxes.** By default (`textBoxes: "auto"`) labels that size themselves in FigCraft size
+themselves in Unity too, with Unity's font metrics: text that changes at run time (localisation)
+resizes, but a line can be a point or two shorter than FigCraft's (U4). With `textBoxes: "fixed"`
+(or the file's *Keep FigCraft's text box sizes*) every label gets FigCraft's measured `width` and
+`height` (except along a fill axis), so the layout is exactly FigCraft's whatever the font.
 
 **Placement.**
 - *Absolute* layers (outside auto layout, or ignoring it): `position: absolute`, per axis by
@@ -259,7 +267,8 @@ child in a frame with a 3 pt border.
 | | Layers within 0.5 pt |
 |---|---|
 | Every non-text layer, every device | **70 / 70** |
-| The text label | 0 / 5: Unity's line is 22.5–22.7 pt tall where FigCraft's is 24 (font metrics), ≤ 0.3 pt narrower; the row centres it 0.7 pt lower |
+| The text label, `textBoxes: "auto"` | 0 / 5: Unity's line is 22.5–22.7 pt tall where FigCraft's is 24 (font metrics), ≤ 0.3 pt narrower; the row centres it 0.7 pt lower |
+| Everything, `textBoxes: "fixed"` | **75 / 75** |
 
 **What it settled:**
 - Absolute children are placed inside the parent's border (the padding box), as exported.
@@ -273,7 +282,11 @@ child in a frame with a 3 pt border.
   bottom-pinned button was 34 pt off on Pixel 5). Layers flush with a frame edge bleed and follow
   the frame (`DeviceFrame::holds`, shared by both).
 
-**Still open:** text metrics (U5 or a text-box option), `gap` and gradients on 6.7, the blur radius
+**Running it:** a runtime panel only lays out while the Game view renders, so the harness brings
+the Editor to the front (`editor_focus`) before each device and waits for the root to reach the
+device's size.
+
+**Still open:** text metrics in `auto` mode (matching FigCraft's line height to TextCore's), `gap` and gradients on 6.7, the blur radius
 halving, and the scripts on a real device (the run set the SafeArea the way `FigcraftSafeArea`
 does rather than through the Device Simulator).
 

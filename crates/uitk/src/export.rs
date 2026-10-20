@@ -64,8 +64,24 @@ pub struct Export {
     pub issues: Vec<Issue>,
 }
 
+/// How to export: the target (version, grid) and the text box rule.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ExportOptions {
+    pub check: CheckOptions,
+    /// Labels keep FigCraft's text box size (width and height in px) instead of sizing themselves
+    /// with Unity's font metrics.
+    pub fixed_text_boxes: bool,
+}
+
+impl From<CheckOptions> for ExportOptions {
+    fn from(check: CheckOptions) -> Self {
+        Self { check, fixed_text_boxes: false }
+    }
+}
+
 /// Export `frames` (top-level frames; other layers are skipped) for `opts`' Unity version.
-pub fn export(doc: &Document, frames: &[NodeId], opts: CheckOptions) -> Export {
+pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>) -> Export {
+    let ExportOptions { check: opts, fixed_text_boxes } = opts.into();
     let mut out = Export::default();
     let mut stems = HashSet::new();
     let mut images: BTreeMap<String, String> = BTreeMap::new();
@@ -76,7 +92,7 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: CheckOptions) -> Export {
             continue;
         }
         let stem = unique_stem(&n.name, &mut stems);
-        let mut w = Writer { doc, opts, uxml: String::new(), uss: String::new(), count: 0, bakes: Vec::new(), images: &mut images };
+        let mut w = Writer { doc, opts, fixed_text_boxes, uxml: String::new(), uss: String::new(), count: 0, bakes: Vec::new(), images: &mut images };
         let safe_area = n.device.is_some();
         w.root(n);
         let uxml = format!(
@@ -125,6 +141,7 @@ enum Place {
 struct Writer<'a> {
     doc: &'a Document,
     opts: CheckOptions,
+    fixed_text_boxes: bool,
     uxml: String,
     uss: String,
     count: usize,
@@ -424,6 +441,8 @@ impl Writer<'_> {
                 let cl = &n.child_layout;
                 let (main, cross) = if row { (cl.sizing_h, cl.sizing_v) } else { (cl.sizing_v, cl.sizing_h) };
                 let mut own = (true, true);
+                // Fixed text boxes keep FigCraft's measured size where the text hugs.
+                let keep = self.fixed_text_boxes && matches!(n.kind, NodeKind::Text(_));
                 match main {
                     Sizing::Fill => {
                         set("flex-grow", "1".into());
@@ -433,7 +452,7 @@ impl Writer<'_> {
                     }
                     Sizing::Fixed | Sizing::Hug => {
                         set("flex-shrink", "0".into());
-                        if main == Sizing::Hug {
+                        if main == Sizing::Hug && !keep {
                             if row { own.0 = false } else { own.1 = false }
                         }
                     }
@@ -443,14 +462,14 @@ impl Writer<'_> {
                         set("align-self", "stretch".into());
                         if row { own.1 = false } else { own.0 = false }
                     }
-                    Sizing::Hug => {
+                    Sizing::Hug if !keep => {
                         if row {
                             own.1 = false
                         } else {
                             own.0 = false
                         }
                     }
-                    Sizing::Fixed => {}
+                    Sizing::Hug | Sizing::Fixed => {}
                 }
                 for (k, v) in [("min-width", cl.min_w), ("max-width", cl.max_w), ("min-height", cl.min_h), ("max-height", cl.max_h)] {
                     if let Some(v) = v {
@@ -469,10 +488,12 @@ impl Writer<'_> {
     }
 
     /// `width`/`height` when the element keeps its own size on that axis (text that sizes itself
-    /// doesn't).
+    /// doesn't, unless text boxes are fixed).
     fn size(&self, n: &Node, w: bool, h: bool, st: &mut Vec<(String, String)>) {
         let (mut w, mut h) = (w, h);
-        if let NodeKind::Text(t) = &n.kind {
+        if let NodeKind::Text(t) = &n.kind
+            && !self.fixed_text_boxes
+        {
             match t.auto_resize {
                 TextAutoResize::WidthAndHeight => (w, h) = (false, false),
                 TextAutoResize::Height => h = false,

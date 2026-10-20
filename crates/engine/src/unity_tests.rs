@@ -157,3 +157,20 @@ fn export_picks_the_selections_top_level_frames() {
     let mut empty = Session::new();
     assert!(empty.execute("file.exportUitk", &json!({})).is_err());
 }
+
+#[test]
+fn text_boxes_follow_the_file_setting_or_the_parameter() {
+    let mut s = Session::new();
+    let f = frame_with_gap(&mut s);
+    let t = s.execute("text.create", &json!({"text": "Hi", "x": 10, "y": 10, "parent": f})).unwrap()["id"].as_u64().unwrap();
+    let uss = |s: &mut Session, p: serde_json::Value| s.execute("file.exportUitk", &p).unwrap()["documents"][0]["uss"].as_str().unwrap().to_string();
+    let label = |uss: &str| uss[uss.find(&format!(".fc-{t} {{")).unwrap()..].split('}').next().unwrap().to_string();
+    assert!(!label(&uss(&mut s, json!({"ids": [f]}))).contains("width:"));
+    assert!(label(&uss(&mut s, json!({"ids": [f], "textBoxes": "fixed"}))).contains("width:"));
+    let r = s.execute("unity.settings.set", &json!({"fixedTextBoxes": true})).unwrap();
+    assert_eq!(r["fixedTextBoxes"], true);
+    assert!(label(&uss(&mut s, json!({"ids": [f]}))).contains("width:"));
+    assert!(!label(&uss(&mut s, json!({"ids": [f], "textBoxes": "auto"}))).contains("width:"));
+    assert!(s.execute("file.exportUitk", &json!({"textBoxes": "maybe"})).is_err());
+    assert!(s.execute("unity.settings.set", &json!({"fixedTextBoxes": "x"})).is_err());
+}
