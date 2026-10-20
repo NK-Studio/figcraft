@@ -2,7 +2,8 @@
 
 > **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`); U2 landed (file
 > settings, layer position and pivot, the right panel's Unity section); U3 landed (UXML/USS
-> export, version-aware conversions, SafeArea container, Unity scripts). U4–U5 planned.
+> export, version-aware conversions, SafeArea container, Unity scripts); U4 run on Unity 6.6
+> (layout matches on 5 devices, text aside). U5 planned.
 > **Owner area:** `crates/uitk` (L2), `UnitySettings` / `Pivot` in `crates/doc` (L1),
 > `crates/engine/src/cmd/unity.rs` (L5), `crates/ui-egui/src/unity_panel.rs` (L6).
 > **Related:** [`device-profiles.md`](device-profiles.md) (devices, safe areas, device frames).
@@ -239,6 +240,43 @@ grid flag; absolute children in the padding box; the blur radius halving; gradie
 non-square boxes; grid auto layout is exported as a wrapping row; rotated baked layers; mixed text
 styles aren't carried (one style per label).
 
+## Unity comparison (U4)
+
+**Harness** (local, `plan/uitk-harness/`, needs a running Editor with the Unity CLI pipeline):
+`figcraft_side.py` builds a test design, exports it into a Unity project's `Assets/FigCraftTest/`
+and records every layer's rectangle (relative to the frame) after `frame.device.set` to each
+device; `unity_side.py` shows the export in a `UIDocument` in play mode, sizes the root to the
+device in points, puts the SafeArea on that device's insets (what `FigcraftSafeArea` computes on
+the device), sets the panel scale to the device's (so layout rounds to its physical pixels), waits
+for the layout and reads each element's `worldBound`; `compare.py` diffs them (0.5 pt tolerance).
+
+**Run of 2026-10-20** — Unity 6000.6.0f1, target 6.6, devices from Unity's own device files:
+iPhone 12 Pro Max (the design device), iPhone SE (2nd gen), Pixel 5, iPad Air (4th gen), iPhone X
+landscape. The design covers stretch, right/top, centre/bottom, scale, a set centre pivot, an auto
+layout row (hug text, fill spacer, fixed avatar, gap), a vertical auto layout list, and an absolute
+child in a frame with a 3 pt border.
+
+| | Layers within 0.5 pt |
+|---|---|
+| Every non-text layer, every device | **70 / 70** |
+| The text label | 0 / 5: Unity's line is 22.5–22.7 pt tall where FigCraft's is 24 (font metrics), ≤ 0.3 pt narrower; the row centres it 0.7 pt lower |
+
+**What it settled:**
+- Absolute children are placed inside the parent's border (the padding box), as exported.
+- The constraint, pivot (`left %` + `translate` + margin), scale (%), stretch and flexbox
+  mappings give Unity's layout exactly, with gaps as margins (6.6).
+- Unity's USS importer takes the generated properties without warnings (`translate`,
+  `filter: drop-shadow()`, `--fc-*` custom properties).
+- **Fixed in FigCraft:** layers inside a device frame's safe area now follow the safe area when the
+  device changes (`frame.device.set`, `frame.swapOrientation`), by their constraints — what the
+  SafeArea container does in Unity; before, FigCraft placed them against the whole frame (the
+  bottom-pinned button was 34 pt off on Pixel 5). Layers flush with a frame edge bleed and follow
+  the frame (`DeviceFrame::holds`, shared by both).
+
+**Still open:** text metrics (U5 or a text-box option), `gap` and gradients on 6.7, the blur radius
+halving, and the scripts on a real device (the run set the SafeArea the way `FigcraftSafeArea`
+does rather than through the Device Simulator).
+
 ## Phases
 
 - **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),
@@ -246,9 +284,8 @@ styles aren't carried (one style per label).
 - **U2 — Unity data on layers** (landed): see [Unity data in the file](#unity-data-in-the-file-u2).
 - **U3 — UXML/USS export** (landed): see [Export](#export-u3). The Unity-side scripts ship as
   generated text with each export (`crates/uitk/src/scripts.rs`).
-- **U4 — Unity comparison harness** (local, `plan/`): through the Unity MCP/CLI, load the export in
-  the Device Simulator for each device and orientation and for several Unity versions (6.0, 6.3,
-  6.7), dump every element's `worldBound`, and diff against FigCraft's rectangles (exact px target).
+- **U4 — Unity comparison harness** (run on 6.6): see [Unity comparison](#unity-comparison-u4). Next
+  runs: 6.0 and 6.7 Editors, and the Device Simulator with the scripts.
 - **U5 — flexbox-compatible layout, if U4 shows gaps**: frames in "UITK mode" laid out with Yoga's
   rules (e.g. the MIT `taffy` crate configured with UITK's defaults) so FigCraft's preview matches
   Unity where Figma's and Yoga's rules differ (shrinking, overflow). Only when measured differences

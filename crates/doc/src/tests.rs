@@ -490,3 +490,18 @@ fn device_frame_geometry_is_kept_within_the_frame() {
     assert_eq!(junk.cutouts_for(400.0, 800.0).len(), 1, "an unusable device size scales by 1");
     assert_eq!(junk.corner_radius_for(10.0, 10.0), 0.0);
 }
+
+#[test]
+fn device_frames_hold_layers_inside_the_safe_area_off_the_edges() {
+    use crate::{DeviceFrame, SideInsets};
+    let notch =
+        DeviceFrame { width: 400.0, height: 800.0, safe_area: SideInsets { top: 50.0, bottom: 30.0, ..Default::default() }, ..Default::default() };
+    assert!(notch.holds(400.0, 800.0, 10.0, 60.0, 40.0, 20.0));
+    assert!(!notch.holds(400.0, 800.0, 10.0, 20.0, 40.0, 20.0), "in the top band");
+    assert!(!notch.holds(400.0, 800.0, 0.0, 0.0, 400.0, 800.0), "a background");
+    let flat = DeviceFrame { width: 400.0, height: 800.0, ..Default::default() };
+    assert!(!flat.holds(400.0, 800.0, 0.0, 0.0, 400.0, 800.0), "flush with the edges: bleeds even without insets");
+    assert!(!flat.holds(400.0, 800.0, 0.0, 300.0, 100.0, 100.0), "flush with the left edge");
+    assert!(flat.holds(400.0, 800.0, 1.0, 300.0, 100.0, 100.0));
+    assert!(!flat.holds(400.0, 800.0, f64::NAN, 300.0, 100.0, 100.0));
+}

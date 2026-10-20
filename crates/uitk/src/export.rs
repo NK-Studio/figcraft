@@ -23,8 +23,6 @@ use crate::{CheckOptions, Feature, Issue};
 const MAX_ELEMENTS: usize = 50_000;
 /// Nesting followed at most.
 const MAX_DEPTH: usize = 200;
-/// How far (pt) a layer may stick into the unsafe bands and still count as inside the safe area.
-const SAFE_SLACK: f64 = 0.5;
 
 /// A layer to render to a PNG: `area` (page coordinates) into `file`.
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -341,13 +339,9 @@ impl Writer<'_> {
     fn device_children(&mut self, n: &Node, kids: &[NodeId], depth: usize) {
         let Some(d) = &n.device else { return };
         let i = d.insets_for(n.width, n.height);
-        let safe = Rect::new(i.left, i.top, n.width - i.right, n.height - i.bottom);
         let inside = |c: &Node| {
             let (p, _) = local_box(c);
-            p.x >= safe.x0 - SAFE_SLACK
-                && p.y >= safe.y0 - SAFE_SLACK
-                && p.x + c.width <= safe.x1 + SAFE_SLACK
-                && p.y + c.height <= safe.y1 + SAFE_SLACK
+            d.holds(n.width, n.height, p.x, p.y, c.width, c.height)
         };
         let flow = n.layout.is_some();
         let (mut outside, mut within) = (Vec::new(), Vec::new());

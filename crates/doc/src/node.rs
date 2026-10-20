@@ -488,6 +488,29 @@ impl DeviceFrame {
             .collect()
     }
 
+    /// The safe area of a `w × h` frame: `(x, y, width, height)`, top-left origin.
+    pub fn safe_rect_for(&self, w: f64, h: f64) -> BoxRect {
+        let i = self.insets_for(w, h);
+        BoxRect { x: i.left, y: i.top, width: (w - i.left - i.right).max(0.0), height: (h - i.top - i.bottom).max(0.0) }
+    }
+
+    /// Whether a layer at `(x, y)` of size `cw × ch` in a `w × h` frame is inside its safe area
+    /// (half a point of slack) without touching the frame's edges: such layers follow the safe
+    /// area, in FigCraft when the device changes and in Unity through the SafeArea container. A
+    /// layer flush with an edge bleeds (backgrounds), so it follows the frame even on a device
+    /// with no inset on that side.
+    pub fn holds(&self, w: f64, h: f64, x: f64, y: f64, cw: f64, ch: f64) -> bool {
+        const SLACK: f64 = 0.5;
+        let s = self.safe_rect_for(w, h);
+        let flush = x <= SLACK || y <= SLACK || x + cw >= w - SLACK || y + ch >= h - SLACK;
+        [x, y, cw, ch].iter().all(|v| v.is_finite())
+            && !flush
+            && x >= s.x - SLACK
+            && y >= s.y - SLACK
+            && x + cw <= s.x + s.width + SLACK
+            && y + ch <= s.y + s.height + SLACK
+    }
+
     /// The screen's corner radius for a `w × h` frame.
     pub fn corner_radius_for(&self, w: f64, h: f64) -> f64 {
         if self.corner_radius.is_finite() { self.corner_radius.clamp(0.0, w.min(h).max(0.0) / 2.0) } else { 0.0 }

@@ -150,6 +150,9 @@ without the profile or Unity installed.
 - **Right panel**: the frame type dropdown lists the imported devices under *Devices* (their
   portrait size), then *Clear device* when a selected frame has one, and *Import devices…* (a
   folder picker; the folder is remembered).
+- **Changing the device**: layers inside the safe area (and off the frame's edges) are placed
+  against the new device's safe area by their constraints, as Unity's SafeArea container places
+  them; other layers follow the frame (`DeviceFrame::holds`).
 - **Orientation**: `frame.swapOrientation` turns a device frame's snapshot too (portrait, else
   upside down ⇄ landscape left, else right) when the profile is imported; otherwise it drops the
   device with a message, since the turned safe area isn't known.

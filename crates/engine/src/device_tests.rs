@@ -221,3 +221,34 @@ fn imported_folders_come_back_at_start_up() {
     s.execute("device.remove", &json!({"all": true})).unwrap();
     assert!(s.prefs.device_sources.is_empty());
 }
+
+#[test]
+fn layers_in_the_safe_area_follow_it_when_the_device_changes() {
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"text": unity_device("Notch Phone").to_string()})).unwrap();
+    // A second device without insets, the same size.
+    let mut flat = unity_device("Flat Phone");
+    flat["screens"][0]["orientations"][0]["safeArea"] = json!({"x": 0.0, "y": 0.0, "width": 1200.0, "height": 2600.0});
+    s.execute("device.import", &json!({"text": flat.to_string()})).unwrap();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/notch-phone"})).unwrap();
+    // Notch phone: 400 × 866.67 pt, safe area 50 down from the top and 30 up from the bottom.
+    let rect = |s: &mut Session, x: f64, y: f64, h: &str, v: &str| {
+        let id = node_id(&s.execute("shape.rectangle", &json!({"x": x, "y": y, "width": 40, "height": 20, "parent": f})).unwrap());
+        s.execute("node.set", &json!({"id": id, "props": {"constraints": {"horizontal": h, "vertical": v}}})).unwrap();
+        id
+    };
+    let top = rect(&mut s, 10.0, 60.0, "left", "top");
+    let bottom = rect(&mut s, 10.0, 866.6667 - 30.0 - 20.0 - 10.0, "left", "bottom");
+    let bleed = rect(&mut s, 0.0, 0.0, "left", "top");
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/flat-phone"})).unwrap();
+    let y = |s: &Session, id| s.doc().unwrap().node(id).unwrap().transform.as_coeffs()[5];
+    // 10 below the safe top (now 0) and 10 above the safe bottom (now the frame's).
+    assert!((y(&s, top) - 10.0).abs() < 1e-3, "{}", y(&s, top));
+    assert!((y(&s, bottom) - (866.6667 - 20.0 - 10.0)).abs() < 1e-3, "{}", y(&s, bottom));
+    // A layer in the unsafe band follows the frame, not the safe area.
+    assert_eq!(y(&s, bleed), 0.0);
+    // One undo step puts everything back.
+    s.execute("edit.undo", &json!({})).unwrap();
+    assert!((y(&s, top) - 60.0).abs() < 1e-3);
+}

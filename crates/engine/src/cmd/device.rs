@@ -340,7 +340,11 @@ fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
         })?,
     };
     let snap = frame_snapshot(&d, sc, o);
-    if params::boolean(p, "resize").unwrap_or(true) {
+    let resize = params::boolean(p, "resize").unwrap_or(true);
+    // Layers inside the old device's safe area follow the safe area (as the SafeArea container
+    // does in Unity): noted before the frame resizes, placed against the new one after.
+    let followers: Vec<SafeFollowers> = if resize { ids.iter().filter_map(|i| safe_followers(s.doc().ok()?, *i)).collect() } else { Vec::new() };
+    if resize {
         for i in &ids {
             super::arrange::resize_cmd(s, &json!({"ids": [i], "width": snap.width, "height": snap.height}))?;
         }
@@ -348,6 +352,9 @@ fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
     let doc = s.doc_mut()?;
     for i in &ids {
         doc.get_mut(*i)?.device = Some(snap.clone());
+    }
+    for f in &followers {
+        place_followers(doc, f, &snap)?;
     }
     Ok(json!({"ids": ids, "device": snap.id, "orientation": snap.orientation, "width": snap.width, "height": snap.height}))
 }
@@ -367,7 +374,7 @@ fn frame_device_clear(s: &mut Session, p: &Value) -> Result<Value> {
 /// After frame `id` turned between portrait and landscape (`frame.swapOrientation`): its device
 /// takes the turned orientation (portrait, else upside down; landscape left, else right), or is
 /// dropped when the profile isn't imported or doesn't support one.
-pub(crate) fn turn_frame_device(s: &mut Session, id: NodeId) -> Result<()> {
+pub(crate) fn turn_frame_device(s: &mut Session, id: NodeId, followers: Option<SafeFollowers>) -> Result<()> {
     let Some(df) = s.doc()?.node(id).and_then(|n| n.device.clone()) else { return Ok(()) };
     let was_landscape = Orientation::parse(&df.orientation).is_some_and(Orientation::is_landscape);
     let wanted = if was_landscape {
@@ -383,6 +390,89 @@ pub(crate) fn turn_frame_device(s: &mut Session, id: NodeId) -> Result<()> {
     if snap.is_none() {
         s.message = Some(format!("{}: device dropped (import it again to keep its safe area when turning)", df.name));
     }
-    s.doc_mut()?.get_mut(id)?.device = snap;
+    let doc = s.doc_mut()?;
+    doc.get_mut(id)?.device = snap.clone();
+    if let (Some(snap), Some(f)) = (snap, followers) {
+        place_followers(doc, &f, &snap)?;
+    }
+    Ok(())
+}
+
+/// A device frame's layers inside its safe area, with their boxes, before the device changes.
+pub(crate) struct SafeFollowers {
+    frame: NodeId,
+    old_safe: BoxRect,
+    /// (layer, x, y, width, height) in the frame.
+    layers: Vec<(NodeId, f64, f64, f64, f64)>,
+}
+
+pub(crate) fn safe_followers(doc: &figcraft_doc::Document, frame: NodeId) -> Option<SafeFollowers> {
+    let n = doc.node(frame)?;
+    let old = n.device.as_ref()?;
+    let mut layers = Vec::new();
+    for c in n.children.iter().filter_map(|c| doc.node(*c)) {
+        // Layers in an auto layout flow move with the layout; turned layers keep the resize's place.
+        let in_flow = n.layout.is_some() && !c.child_layout.absolute;
+        if in_flow || figcraft_geom::rotation_degrees(c.transform).abs() > 1e-6 {
+            continue;
+        }
+        let at = figcraft_geom::translation(c.transform);
+        if old.holds(n.width, n.height, at.x, at.y, c.width, c.height) {
+            layers.push((c.id, at.x, at.y, c.width, c.height));
+        }
+    }
+    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), layers })
+}
+
+/// One axis of a constraint from a box `from` long to one `to` long: the new position and size.
+fn follow(pin: Pin, pos: f64, len: f64, from: f64, to: f64) -> (f64, f64) {
+    match pin {
+        Pin::Start => (pos, len),
+        Pin::End => (to - (from - pos - len) - len, len),
+        Pin::Center => (pos + (to - from) / 2.0, len),
+        Pin::Stretch => (pos, (len + to - from).max(0.0)),
+        Pin::Scale if from > 0.0 => (pos * to / from, len * to / from),
+        Pin::Scale => (pos, len),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum Pin {
+    Start,
+    End,
+    Center,
+    Stretch,
+    Scale,
+}
+
+fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &DeviceFrame) -> Result<()> {
+    let Some(n) = doc.node(f.frame) else { return Ok(()) };
+    let new_safe = snap.safe_rect_for(n.width, n.height);
+    let (o, s) = (f.old_safe, new_safe);
+    for &(id, x, y, w, h) in &f.layers {
+        let Some(c) = doc.node(id) else { continue };
+        let hpin = match c.constraints.horizontal {
+            figcraft_doc::HConstraint::Left => Pin::Start,
+            figcraft_doc::HConstraint::Right => Pin::End,
+            figcraft_doc::HConstraint::Center => Pin::Center,
+            figcraft_doc::HConstraint::LeftRight => Pin::Stretch,
+            figcraft_doc::HConstraint::Scale => Pin::Scale,
+        };
+        let vpin = match c.constraints.vertical {
+            figcraft_doc::VConstraint::Top => Pin::Start,
+            figcraft_doc::VConstraint::Bottom => Pin::End,
+            figcraft_doc::VConstraint::Center => Pin::Center,
+            figcraft_doc::VConstraint::TopBottom => Pin::Stretch,
+            figcraft_doc::VConstraint::Scale => Pin::Scale,
+        };
+        let (nx, nw) = follow(hpin, x - o.x, w, o.width, s.width);
+        let (ny, nh) = follow(vpin, y - o.y, h, o.height, s.height);
+        let mut props = serde_json::Map::new();
+        props.insert("x".into(), json!(r4(nx + s.x)));
+        props.insert("y".into(), json!(r4(ny + s.y)));
+        props.insert("width".into(), json!(r4(nw)));
+        props.insert("height".into(), json!(r4(nh)));
+        crate::cmd::props::apply("frame.device.set", doc, id, &props)?;
+    }
     Ok(())
 }
