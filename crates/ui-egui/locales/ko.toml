@@ -1687,6 +1687,7 @@ status = "draft — needs native review"
 "Speed" = "속도"
 "Loop" = "반복"
 "Play in presentation" = "프레젠테이션에서 재생"
+"Import Spine folder" = "Spine 폴더 가져오기"
 
 [commands]
 "align.bottom" = "아래쪽 정렬"
@@ -2262,7 +2263,7 @@ status = "draft — needs native review"
 "widget.list" = "위젯 목록"
 "window.focus" = "창을 맨 앞으로 가져오기"
 "window.new" = "새 창"
-"spine.place" = "Spine 스켈레톤 배치"
+"spine.place" = "Spine 폴더 가져오기…"
 "spine.set" = "Spine 포즈 설정"
 "spine.info" = "Spine 스켈레톤 정보"
 

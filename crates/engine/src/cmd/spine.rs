@@ -15,13 +15,15 @@ use crate::{Result, Session, bad, spec};
 const MAX_FILE: u64 = 256 * 1024 * 1024;
 /// Most atlas pages one skeleton may have.
 const MAX_PAGES: usize = 256;
+/// Most files looked at in a Spine folder.
+const MAX_FOLDER_FILES: usize = 1024;
 
 pub fn specs() -> Vec<CommandSpec> {
     vec![
         spec!(
             "spine.place",
-            "Place Spine Skeleton",
-            "{path (a skeleton `.json`/`.skel`, or its `.atlas`) | skeleton (base64) + binary? + atlas (text) + pages ({file: base64}), atlas? (path; default `<name>.atlas` beside the skeleton), name?, x?, y? (top-left; default centred in the view), parent?, animation?, skin?} → {id, asset, width, height, animations, skins}",
+            "Import Spine Folder…",
+            "{dir (the folder holding the skeleton `.json`/`.skel`, its `.atlas` and its pages; without it or data the UI asks for the folder), skeleton? (with `dir`: the skeleton's name when the folder has several; with data: base64), binary? + atlas (text) + pages ({file: base64}) (data instead of `dir`), name?, x?, y? (top-left; default centred in the view), parent?, animation?, skin?} → {id, asset, width, height, animations, skins} ({placed: false} when the folder is asked for)",
             true,
             place
         ),
@@ -53,42 +55,59 @@ struct Export {
     pages: Vec<(String, Vec<u8>)>,
 }
 
-fn ext(path: &Path) -> String {
-    path.extension().and_then(|e| e.to_str()).unwrap_or("").to_ascii_lowercase()
-}
-
 fn read(path: &Path) -> Result<Vec<u8>> {
     crate::file_access::read_capped(path, MAX_FILE)
 }
 
-/// The export at `path`: a skeleton with its atlas beside it, or an atlas with its skeleton.
-fn from_path(cmd: &str, path: &Path, atlas: Option<&str>) -> Result<Export> {
-    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("Skeleton").to_string();
-    let dir = path.parent().map(Path::to_path_buf).unwrap_or_default();
-    let skeleton_path = if ext(path) == "atlas" {
-        ["json", "skel"]
-            .iter()
-            .map(|e| dir.join(format!("{stem}.{e}")))
-            .find(|p| crate::file_access::metadata(p).is_ok_and(|m| m.is_file()))
-            .ok_or_else(|| bad(cmd, format!("no {stem}.json or {stem}.skel beside the atlas")))?
-    } else {
-        path.to_path_buf()
+/// A file's name with one of `suffixes` cut off (case-insensitively), or `None`.
+fn stem_of(path: &Path, suffixes: &[&str]) -> Option<String> {
+    let name = path.file_name()?.to_str()?;
+    let lower = name.to_ascii_lowercase();
+    suffixes.iter().find_map(|s| lower.strip_suffix(s).filter(|st| !st.is_empty()).and_then(|st| name.get(..st.len())).map(str::to_string))
+}
+
+/// The Spine export in folder `dir`: its skeleton (`<name>.json`, `<name>.skel` or Unity's
+/// `<name>.skel.bytes`), its atlas (`<name>.atlas` or `<name>.atlas.txt`) and the atlas pages, all
+/// in that folder. With several skeletons there, `skeleton` names the one to place.
+fn from_dir(cmd: &str, dir: &Path, skeleton: Option<&str>) -> Result<Export> {
+    if !crate::file_access::is_dir(dir) {
+        return Err(bad(cmd, format!("{} isn't a folder: choose the folder holding the skeleton, its atlas and its pages", dir.display())));
+    }
+    let mut files: Vec<PathBuf> =
+        crate::file_access::read_dir(dir)?.into_iter().filter(|p| crate::file_access::metadata(p).is_ok_and(|m| m.is_file())).collect();
+    files.sort();
+    let mut skeletons: Vec<(String, PathBuf, bool)> = Vec::new();
+    let mut atlases: Vec<(String, PathBuf)> = Vec::new();
+    for f in files.into_iter().take(MAX_FOLDER_FILES) {
+        if let Some(st) = stem_of(&f, &[".skel.bytes", ".skel"]) {
+            skeletons.push((st, f, true));
+        } else if let Some(st) = stem_of(&f, &[".atlas.txt", ".atlas"]) {
+            atlases.push((st, f));
+        } else if let Some(st) = stem_of(&f, &[".json"])
+            && read(&f).is_ok_and(|b| figcraft_spine::is_skeleton_json(&b))
+        {
+            skeletons.push((st, f, false));
+        }
+    }
+    let names = |list: Vec<&String>| list.iter().map(|n| n.as_str()).collect::<Vec<_>>().join(", ");
+    let (name, skeleton_path, binary) = match skeleton {
+        Some(want) => {
+            skeletons.into_iter().find(|(st, ..)| st == want).ok_or_else(|| bad(cmd, format!("no skeleton named {want:?} in the folder")))?
+        }
+        None if skeletons.len() > 1 => {
+            return Err(bad(cmd, format!("the folder has several skeletons ({}): pass `skeleton`", names(skeletons.iter().map(|s| &s.0).collect()))));
+        }
+        None => skeletons.into_iter().next().ok_or_else(|| bad(cmd, format!("no Spine skeleton (.json, .skel) in {}", dir.display())))?,
     };
-    let atlas_path = match atlas {
-        Some(a) => PathBuf::from(a),
-        None if ext(path) == "atlas" => path.to_path_buf(),
-        None => dir.join(format!("{stem}.atlas")),
+    let atlas_path = match atlases.iter().position(|(st, _)| *st == name) {
+        Some(i) => atlases.swap_remove(i).1,
+        None if atlases.len() == 1 => atlases.swap_remove(0).1,
+        None if atlases.is_empty() => return Err(bad(cmd, format!("no atlas (.atlas) in {}", dir.display()))),
+        None => return Err(bad(cmd, format!("no {name}.atlas among the folder's atlases ({})", names(atlases.iter().map(|a| &a.0).collect())))),
     };
     let atlas =
         String::from_utf8(read(&atlas_path).map_err(|e| bad(cmd, format!("the atlas: {e}")))?).map_err(|_| bad(cmd, "the atlas isn't text"))?;
-    Ok(Export {
-        name: stem,
-        binary: ext(&skeleton_path) == "skel",
-        skeleton: read(&skeleton_path)?,
-        atlas,
-        dir: atlas_path.parent().map(Path::to_path_buf),
-        pages: Vec::new(),
-    })
+    Ok(Export { name, binary, skeleton: read(&skeleton_path)?, atlas, dir: Some(dir.to_path_buf()), pages: Vec::new() })
 }
 
 fn decode(cmd: &str, what: &str, b64: &str) -> Result<Vec<u8>> {
@@ -97,7 +116,7 @@ fn decode(cmd: &str, what: &str, b64: &str) -> Result<Vec<u8>> {
 }
 
 fn from_data(cmd: &str, p: &Value) -> Result<Export> {
-    let skeleton = decode(cmd, "`skeleton`", &string(p, "skeleton").ok_or_else(|| bad(cmd, "pass `path`, or `skeleton` and `atlas`"))?)?;
+    let skeleton = decode(cmd, "`skeleton`", &string(p, "skeleton").ok_or_else(|| bad(cmd, "pass `dir`, or `skeleton` and `atlas`"))?)?;
     let atlas = string(p, "atlas").ok_or_else(|| bad(cmd, "`atlas`: the .atlas text"))?;
     let mut pages = Vec::new();
     if let Some(m) = get(p, "pages").and_then(Value::as_object) {
@@ -124,9 +143,14 @@ fn page_path(dir: &Path, page: &str) -> Option<PathBuf> {
 
 pub fn place(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "spine.place";
-    let mut export = match string(p, "path") {
-        Some(path) => from_path(CMD, Path::new(&path), string(p, "atlas").as_deref())?,
-        None => from_data(CMD, p)?,
+    let mut export = match string(p, "dir") {
+        Some(dir) => from_dir(CMD, Path::new(&dir), string(p, "skeleton").as_deref())?,
+        None if get(p, "skeleton").is_some() || get(p, "atlas").is_some() => from_data(CMD, p)?,
+        None => {
+            // From the menus: choose the folder.
+            s.request_ui("dialog.spineFolder", json!({}));
+            return Ok(json!({"placed": false}));
+        }
     };
     let asset = figcraft_spine::Asset::load(&export.skeleton, export.binary, &export.atlas).map_err(|e| bad(CMD, e.to_string()))?;
     let info = asset.info().clone();

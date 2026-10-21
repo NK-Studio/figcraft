@@ -1,5 +1,5 @@
-//! `spine.*` and Spine files through `file.import`: placing a skeleton from disk or data, posing
-//! it, and the refusals.
+//! `spine.*` and Spine folders through `file.import`: placing a skeleton from its folder or from
+//! data, posing it, and the refusals.
 
 use std::path::PathBuf;
 
@@ -31,10 +31,10 @@ fn id(r: &Value) -> u64 {
 }
 
 #[test]
-fn imports_a_skeleton_with_its_atlas_and_pages() {
+fn imports_a_skeleton_from_its_folder() {
     let dir = export_dir("import");
     let mut s = Session::new();
-    let r = s.execute("file.import", &json!({"path": dir.join("figure.json"), "x": 10, "y": 20})).unwrap();
+    let r = s.execute("file.import", &json!({"path": dir, "x": 10, "y": 20})).unwrap();
     let n = id(&r);
     assert_eq!(r["width"], 64.0);
     assert_eq!(r["height"], 32.0);
@@ -44,11 +44,35 @@ fn imports_a_skeleton_with_its_atlas_and_pages() {
     assert_eq!(info["name"], "figure");
     assert_eq!(info["skins"], json!(["default", "bare"]));
     assert_eq!(info["pages"], json!(["figure.png"]));
-    // The atlas works as the file to import too.
-    let r = s.execute("file.import", &json!({"path": dir.join("figure.atlas")})).unwrap();
+    // spine.place takes the folder too; both layers use the one stored skeleton.
+    let r = s.execute("spine.place", &json!({"dir": dir})).unwrap();
     assert_ne!(id(&r), n);
-    // Both use the one stored skeleton.
     assert_eq!(s.doc().unwrap().spine.len(), 1);
+    // Without a folder (from the menus) it asks for one and places nothing.
+    assert_eq!(s.execute("spine.place", &json!({})).unwrap()["placed"], false);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn single_files_are_refused_and_unity_names_work() {
+    let dir = export_dir("files");
+    let mut s = Session::new();
+    for f in ["figure.json", "figure.atlas"] {
+        let e = s.execute("file.import", &json!({"path": dir.join(f)})).unwrap_err().to_string();
+        assert!(e.contains("imports as its folder"), "{f}: {e}");
+    }
+    let e = s.execute("spine.place", &json!({"dir": dir.join("figure.json")})).unwrap_err().to_string();
+    assert!(e.contains("isn't a folder"), "{e}");
+    // A folder copied out of a Unity project: `.skel.bytes`-style and `.atlas.txt` names.
+    std::fs::rename(dir.join("figure.atlas"), dir.join("figure.atlas.txt")).unwrap();
+    assert!(s.execute("spine.place", &json!({"dir": dir})).is_ok());
+    // Several skeletons: name one.
+    std::fs::write(dir.join("other.json"), SKELETON_JSON).unwrap();
+    let e = s.execute("spine.place", &json!({"dir": dir})).unwrap_err().to_string();
+    assert!(e.contains("several skeletons (figure, other)"), "{e}");
+    let r = s.execute("spine.place", &json!({"dir": dir, "skeleton": "other"})).unwrap();
+    assert_eq!(s.execute("spine.info", &json!({"id": id(&r)})).unwrap()["name"], "other");
+    assert!(s.execute("spine.place", &json!({"dir": dir, "skeleton": "nope"})).unwrap_err().to_string().contains("no skeleton named"));
     std::fs::remove_dir_all(dir).ok();
 }
 
@@ -84,20 +108,20 @@ fn places_from_data_and_round_trips() {
 fn refusals() {
     let dir = export_dir("refuse");
     let mut s = Session::new();
-    let path = dir.join("figure.json");
+    let path = &dir;
     let err = |s: &mut Session, cmd: &str, p: Value| s.execute(cmd, &p).unwrap_err().to_string();
-    assert!(err(&mut s, "spine.place", json!({"path": path, "animation": "nope"})).contains("no animation"));
+    assert!(err(&mut s, "spine.place", json!({"dir": path, "animation": "nope"})).contains("no animation"));
     std::fs::remove_file(dir.join(PAGE.0)).unwrap();
-    assert!(err(&mut s, "spine.place", json!({"path": path})).contains("figure.png"));
+    assert!(err(&mut s, "spine.place", json!({"dir": path})).contains("figure.png"));
     std::fs::remove_file(dir.join("figure.atlas")).unwrap();
-    assert!(err(&mut s, "spine.place", json!({"path": path})).contains("atlas"));
+    assert!(err(&mut s, "spine.place", json!({"dir": path})).contains("no atlas"));
     // A JSON that isn't Spine still goes to the document importer.
     std::fs::write(dir.join("other.json"), "{\"skeleton\": 1}").unwrap();
     assert!(!err(&mut s, "file.import", json!({"path": dir.join("other.json")})).contains("Spine"));
     // Pages named outside the atlas folder are refused.
     std::fs::write(dir.join("figure.atlas"), ATLAS.replace("figure.png", "../figure.png")).unwrap();
     std::fs::write(dir.join(PAGE.0), page_png()).unwrap();
-    assert!(err(&mut s, "spine.place", json!({"path": path})).contains("isn't a file beside"));
+    assert!(err(&mut s, "spine.place", json!({"dir": path})).contains("isn't a file beside"));
     // Data without its pages, and spine.set on a rectangle.
     assert!(err(&mut s, "spine.place", json!({"skeleton": "e30=", "atlas": ""})).contains("Spine"));
     let r = id(&s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 10, "height": 10})).unwrap());
@@ -109,7 +133,7 @@ fn refusals() {
 fn junk_on_a_spine_layer_never_panics() {
     let dir = export_dir("junk");
     let mut s = Session::new();
-    let n = id(&s.execute("file.import", &json!({"path": dir.join("figure.json")})).unwrap());
+    let n = id(&s.execute("file.import", &json!({"path": dir})).unwrap());
     let junk = [
         json!({"ids": [n], "animation": 5, "skin": [1], "time": "x"}),
         json!({"ids": [n], "time": 1e308, "speed": -1e308, "looping": "yes", "playing": null}),
@@ -136,7 +160,7 @@ fn unity_export_carries_the_skeleton_files() {
     let out = dir.join("unity");
     let mut s = Session::new();
     let f = id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 200, "height": 100, "name": "Screen"})).unwrap());
-    let n = id(&s.execute("spine.place", &json!({"path": dir.join("figure.json"), "parent": f, "x": 10, "y": 10, "name": "Hero"})).unwrap());
+    let n = id(&s.execute("spine.place", &json!({"dir": dir, "parent": f, "x": 10, "y": 10, "name": "Hero"})).unwrap());
     s.execute("spine.set", &json!({"ids": [n], "animation": "wave", "playing": true})).unwrap();
     let check = s.execute("unity.check", &json!({"ids": [f]})).unwrap();
     assert!(check["issues"].as_array().unwrap().iter().any(|i| i["rule"] == "spine"), "{check}");

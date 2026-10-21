@@ -1,6 +1,6 @@
 # Spine skeletons
 
-> **Last updated:** 2026-10-21 · **Change:** new (Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
+> **Last updated:** 2026-10-21 · **Change:** minor (imports take the export's folder only; Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
 
 FigCraft places [Spine](https://esotericsoftware.com/) 4.3 skeleton exports as layers, poses them
 at an animation, skin and time, plays them in presentation and carries them into Unity exports. A
@@ -22,20 +22,27 @@ FigCraft extension: Figma has no equivalent, and nothing here is in the menu cat
 
 ## Files and import
 
-A Spine export is a skeleton (`<name>.json` or binary `<name>.skel`), its atlas (`<name>.atlas`)
-and the atlas page images the atlas names. `file.import` (and dropping a file on the canvas) takes
-any of the skeleton or atlas and finds the others beside it; a `.json` goes to Spine only when it
-has a top-level `skeleton` object and `bones` (otherwise it is a FigCraft or REST API document as
-before).
+A Spine export imports **as its folder**: the folder holding the skeleton (`<name>.json`, binary
+`<name>.skel`, or Unity's `<name>.skel.bytes`), its atlas (`<name>.atlas` or `<name>.atlas.txt`)
+and the atlas page images the atlas names. Choosing one file alone isn't accepted: it wouldn't
+bring the atlas and pages with it.
+
+- *Import Spine Folder…* (the Actions palette; `spine.place` with no folder) asks for the folder.
+- `file.import {path}` with a folder places the skeleton in it. A single `.skel`, `.atlas` or Spine
+  `.json` is refused with a message to choose the folder; other `.json` files import as FigCraft
+  or REST API documents as before.
+- A folder with several skeletons needs `skeleton` (the name). The atlas is the one with the
+  skeleton's name, or the folder's only atlas.
+- Dropping a folder on the canvas loads it as a font folder (font work), not as Spine.
 
 | Command | Params → result |
 |---|---|
-| `spine.place` | `{path (.json/.skel/.atlas) \| skeleton (base64) + binary? + atlas (text) + pages ({file: base64}), atlas? (path), name?, x?, y? (top-left; default centred in the view), parent?, animation?, skin?}` → `{id, asset, width, height, animations, skins}` |
+| `spine.place` | `{dir, skeleton? (name, when the folder has several), name?, x?, y? (top-left; default centred in the view), parent?, animation?, skin?}`, or data instead of `dir`: `{skeleton (base64), binary?, atlas (text), pages ({file: base64})}` → `{id, asset, width, height, animations, skins}`; with neither, the UI asks for the folder → `{placed: false}` |
 | `spine.set` | `{ids?, animation? (name, or null: setup pose), skin? (name, or null: default skin), time? (s), looping?, playing?, speed?}` → `{ids}` (undoable; unknown names are errors) |
 | `spine.info` | `{id?}` → `{id, asset, name, version, animations: [{name, duration}], skins, pages, animation, skin, time, looping, playing, speed}` |
 
-Atlas page names must be files inside the atlas's folder (no absolute paths or `..`). Files are
-read through the automation file roots like every other import.
+Atlas page names must be files inside the folder (no absolute paths or `..`). Files are read
+through the automation file roots like every other import.
 
 ## Layers
 

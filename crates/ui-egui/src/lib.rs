@@ -1025,6 +1025,10 @@ impl FigApp {
                 }
                 "dialog.saveAs" => self.save_as_dialog(),
                 "dialog.colorProfile" => self.ui.color_profile = self.session.doc().ok().map(|d| d.color_profile),
+                // A Spine export imports as its folder (skeleton, atlas and pages together).
+                "dialog.spineFolder" => self.pick_folder(i18n::tr("Import Spine folder"), |app, dir| {
+                    app.run_user("spine.place", json!({"dir": dir.to_string_lossy()}));
+                }),
                 "present" => {
                     if let Some(start) = r.data.get("start").and_then(figcraft_engine::params::id_of) {
                         let mut p = present::Presenter::new(start);

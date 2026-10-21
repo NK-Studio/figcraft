@@ -483,18 +483,9 @@ fn file_stem(path: &str) -> String {
     std::path::Path::new(path).file_stem().and_then(|e| e.to_str()).unwrap_or("Untitled").to_string()
 }
 
-/// A Spine skeleton (or its atlas) imported: placed with `spine.place` from its path, so the
-/// atlas and its pages beside it come too.
-fn import_spine(s: &mut Session, path: Option<&str>, x: Option<f64>, y: Option<f64>) -> Result<Value> {
-    let Some(path) = path else {
-        return Err(bad("file.import", "a Spine skeleton needs its atlas and pages: import it by `path`, or use spine.place"));
-    };
-    let mut q = json!({"path": path});
-    if let (Some(x), Some(y)) = (x, y) {
-        q["x"] = json!(x);
-        q["y"] = json!(y);
-    }
-    crate::cmd::spine::place(s, &q)
+/// Spine files import as a folder: one file alone doesn't bring the atlas and pages with it.
+fn spine_file() -> EngineError {
+    bad("file.import", "a Spine skeleton imports as its folder: choose the folder holding the skeleton, its atlas and its pages (spine.place {dir})")
 }
 
 /// The counts the import report shows for a freshly loaded document.
@@ -1265,6 +1256,15 @@ fn export_frames_pdf(s: &mut Session, p: &Value) -> Result<Value> {
 
 fn import(s: &mut Session, p: &Value) -> Result<Value> {
     let path = string(p, "path");
+    // A folder is a Spine export (skeleton, atlas and pages together).
+    if let Some(dir) = path.as_deref().filter(|d| crate::file_access::is_dir(d)) {
+        let mut q = json!({"dir": dir});
+        if let (Some(x), Some(y)) = (num(p, "x"), num(p, "y")) {
+            q["x"] = json!(x);
+            q["y"] = json!(y);
+        }
+        return crate::cmd::spine::place(s, &q);
+    }
     let variables = variables_param("file.import", p)?;
     let (bytes, name) = if let Some(path) = &path {
         (read(path)?, path.clone())
@@ -1300,8 +1300,8 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             }
             Ok(out)
         }
-        "skel" | "atlas" => import_spine(s, path.as_deref(), x, y),
-        "json" if figcraft_spine::is_skeleton_json(&bytes) => import_spine(s, path.as_deref(), x, y),
+        "skel" | "atlas" => Err(spine_file()),
+        "json" if figcraft_spine::is_skeleton_json(&bytes) => Err(spine_file()),
         "figcraft" | "json" | "fig" => {
             let resolver = path.as_deref().map(rest_images);
             let images: figcraft_format::rest::ImageResolver = match &resolver {
