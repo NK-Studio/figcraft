@@ -11,6 +11,16 @@ name = "简体中文"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "缺少的字体"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "此文件使用了此电脑上未安装的字体。安装之前，这些文字以替代字体显示。"
+"{n} text layers" = { other = "{n} 个文本图层" }
+"All the fonts this file uses are installed" = "此文件使用的字体均已安装"
+"Checking the fonts installed on this computer…" = "正在检查此电脑上安装的字体…"
+"only in a text style or variable" = "仅用于文本样式或变量"
+"Load font file…" = "载入字体文件…"
+"Add font folder…" = "添加字体文件夹…"
+"Rescan fonts" = "重新扫描字体"
+"Look again for fonts installed since FigCraft started" = "重新查找 FigCraft 启动后安装的字体"
 "% of all commits" = "占全部提交的 %"
 "(no longer published)" = "（已停止发布）"
 "({n} warnings: some entries were skipped)" = { other = "（{n} 条警告：已跳过部分条目）" }

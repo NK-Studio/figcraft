@@ -17,6 +17,9 @@ pub struct Shown {
     pub families: Vec<Missing>,
     /// Asked for before the installed fonts were indexed: the list comes once they are.
     pub indexing: bool,
+    /// The fonts as they were when the list was made ([`figcraft_text::layout_generation`]):
+    /// fonts added since (a file, a folder, a rescan, a command) make it list again.
+    pub generation: u64,
 }
 
 impl Shown {
@@ -44,8 +47,9 @@ pub fn check_later(app: &mut FigApp, command: &str, result: Option<&Value>) {
 /// The window for document `uid`, listing what it misses (even nothing, when asked for).
 fn list(app: &mut FigApp, uid: u64) -> Option<Vec<Missing>> {
     let ds = app.session.docs.iter().find(|d| d.uid == uid)?;
+    let generation = figcraft_text::layout_generation();
     let families = missing(&ds.doc);
-    app.ui.missing_fonts = Some(Shown { uid, families: families.clone(), indexing: false });
+    app.ui.missing_fonts = Some(Shown { uid, families: families.clone(), indexing: false, generation });
     Some(families)
 }
 
@@ -62,7 +66,7 @@ pub fn request(app: &mut FigApp) {
     if figcraft_text::installed_fonts_known() {
         list(app, uid);
     } else {
-        app.ui.missing_fonts = Some(Shown { uid, families: Vec::new(), indexing: true });
+        app.ui.missing_fonts = Some(Shown { uid, families: Vec::new(), indexing: true, generation: 0 });
     }
 }
 
@@ -81,6 +85,15 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
         }
     }
     if app.ui.missing_fonts.as_ref().is_some_and(|m| !app.session.docs.iter().any(|d| d.uid == m.uid)) {
+        app.ui.missing_fonts = None;
+    }
+    // Fonts were added since the list was made, however they came: the ones found go, and when
+    // none are left the window has done its job.
+    let stale = app.ui.missing_fonts.as_ref().filter(|m| !m.indexing && m.generation != figcraft_text::layout_generation());
+    if let Some((uid, had)) = stale.map(|m| (m.uid, !m.families.is_empty()))
+        && list(app, uid).is_some_and(|f| f.is_empty())
+        && had
+    {
         app.ui.missing_fonts = None;
     }
     let Some(shown) = &app.ui.missing_fonts else { return };

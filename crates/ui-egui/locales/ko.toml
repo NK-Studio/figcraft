@@ -10,6 +10,12 @@ name = "한국어"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "누락된 글꼴"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "이 파일은 이 컴퓨터에 설치되지 않은 글꼴을 사용함. 설치하기 전까지 해당 텍스트는 대체 글꼴로 표시됨."
+"{n} text layers" = { other = "텍스트 레이어 {n}개" }
+"All the fonts this file uses are installed" = "이 파일이 쓰는 글꼴이 모두 설치되어 있음"
+"Checking the fonts installed on this computer…" = "이 컴퓨터에 설치된 글꼴 확인 중…"
+"only in a text style or variable" = "텍스트 스타일이나 변수에서만 사용"
 "% of all commits" = "전체 커밋 중 %"
 "(no longer published)" = "(게시 중단됨)"
 "({n} warnings: some entries were skipped)" = { other = "(경고 {n}개: 일부 항목을 건너뜀)" }

@@ -121,7 +121,7 @@ fn asked_for_before_the_fonts_are_indexed_it_lists_them_once_they_are() {
     std::fs::remove_file(&path).unwrap();
     // As Text ▸ Missing fonts leaves it while the startup scan is still running.
     let uid = u.app.session.ds().unwrap().uid;
-    u.app.ui.missing_fonts = Some(crate::missing_fonts::Shown { uid, families: Vec::new(), indexing: true });
+    u.app.ui.missing_fonts = Some(crate::missing_fonts::Shown { uid, families: Vec::new(), indexing: true, generation: 0 });
     u.frame(vec![]);
     assert_eq!(listed(&u), json!({"families": [{"family": "FigCraft Missing Indexing", "layers": 2}], "indexing": false}));
 }
@@ -145,5 +145,34 @@ fn placing_images_or_clearing_recents_does_not_bring_it_back() {
     std::fs::remove_file(&svg).unwrap();
     u.frame(vec![]);
     assert!(u.app.ui.font_checks.is_empty());
+    assert_eq!(listed(&u), Value::Null);
+}
+
+#[test]
+fn fonts_arriving_list_it_again_and_close_it_when_nothing_is_missing() {
+    if !fonts_indexed() {
+        eprintln!("skipped: system fonts opted out");
+        return;
+    }
+    let Some(installed) = figcraft_text::family_names().into_iter().next() else { return };
+    let path = saved("arrive", &["FigCraft Missing Arrive"]);
+    let mut u = Ui::new(Session::new());
+    u.app.run_user("file.open", json!({"path": path}));
+    std::fs::remove_file(&path).unwrap();
+    u.frame(vec![]);
+    assert_eq!(listed(&u)["families"][0]["family"], "FigCraft Missing Arrive");
+    // Fonts added that aren't the missing one (another file, a folder): still listed.
+    figcraft_text::clear_layout_cache();
+    u.frame(vec![]);
+    assert_eq!(listed(&u)["families"][0]["family"], "FigCraft Missing Arrive");
+    // Once nothing is missing any more and fonts arrive, the window goes by itself (here the text
+    // takes an installed family, as it would when the missing family's file is loaded).
+    let ids: Vec<u64> = u.app.session.doc().unwrap().nodes().filter(|n| matches!(n.kind, figcraft_doc::NodeKind::Text(_))).map(|n| n.id.0).collect();
+    assert_eq!(ids.len(), 2);
+    for id in ids {
+        u.app.session.execute("node.set", &json!({"id": id, "props": {"fontFamily": installed}})).unwrap();
+    }
+    figcraft_text::clear_layout_cache();
+    u.frame(vec![]);
     assert_eq!(listed(&u), Value::Null);
 }

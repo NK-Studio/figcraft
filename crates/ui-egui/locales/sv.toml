@@ -7,6 +7,16 @@
 name = "Svenska"
 
 [ui]
+"Missing fonts" = "Saknade typsnitt"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "Den här filen använder typsnitt som inte är installerade på den här datorn. Texten visas med ett ersättningstypsnitt tills du installerar dem."
+"{n} text layers" = { one = "{n} textlager", other = "{n} textlager" }
+"All the fonts this file uses are installed" = "Alla typsnitt som filen använder är installerade"
+"Checking the fonts installed on this computer…" = "Kontrollerar typsnitten som är installerade på datorn…"
+"only in a text style or variable" = "bara i en textstil eller variabel"
+"Load font file…" = "Läs in typsnittsfil…"
+"Add font folder…" = "Lägg till typsnittsmapp…"
+"Rescan fonts" = "Sök efter typsnitt igen"
+"Look again for fonts installed since FigCraft started" = "Sök igen efter typsnitt som installerats sedan FigCraft startade"
 
 "% of all commits" = "% av alla commits"
 "(no longer published)" = "(publiceras inte längre)"

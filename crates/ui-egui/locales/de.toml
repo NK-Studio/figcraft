@@ -9,6 +9,16 @@ name = "Deutsch"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "Fehlende Schriften"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "Diese Datei verwendet Schriften, die auf diesem Computer nicht installiert sind. Ihr Text wird in einer Ersatzschrift dargestellt, bis Sie sie installieren."
+"{n} text layers" = { one = "{n} Textebene", other = "{n} Textebenen" }
+"All the fonts this file uses are installed" = "Alle Schriften dieser Datei sind installiert"
+"Checking the fonts installed on this computer…" = "Die auf diesem Computer installierten Schriften werden geprüft…"
+"only in a text style or variable" = "nur in einem Textstil oder einer Variable"
+"Load font file…" = "Schriftdatei laden…"
+"Add font folder…" = "Schriftordner hinzufügen…"
+"Rescan fonts" = "Schriften neu suchen"
+"Look again for fonts installed since FigCraft started" = "Erneut nach Schriften suchen, die seit dem Start von FigCraft installiert wurden"
 "% of all commits" = "% aller Commits"
 "(no longer published)" = "(nicht mehr veröffentlicht)"
 "({n} warnings: some entries were skipped)" = { one = "({n} Warnung: einige Einträge wurden übersprungen)", other = "({n} Warnungen: einige Einträge wurden übersprungen)" }

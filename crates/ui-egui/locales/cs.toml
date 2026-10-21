@@ -5,6 +5,16 @@ name = "Čeština"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "Chybějící písma"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "Tento soubor používá písma, která na tomto počítači nejsou nainstalovaná. Jejich text se do instalace zobrazuje náhradním písmem."
+"{n} text layers" = { one = "{n} textová vrstva", few = "{n} textové vrstvy", other = "{n} textových vrstev" }
+"All the fonts this file uses are installed" = "Všechna písma, která tento soubor používá, jsou nainstalovaná"
+"Checking the fonts installed on this computer…" = "Kontrolují se písma nainstalovaná v tomto počítači…"
+"only in a text style or variable" = "jen ve stylu textu nebo v proměnné"
+"Load font file…" = "Načíst soubor písma…"
+"Add font folder…" = "Přidat složku s písmy…"
+"Rescan fonts" = "Znovu vyhledat písma"
+"Look again for fonts installed since FigCraft started" = "Znovu vyhledat písma nainstalovaná od spuštění FigCraftu"
 "% of all commits" = "% všech commitů"
 "(no longer published)" = "(již nepublikováno)"
 "({n} warnings: some entries were skipped)" = { one = "({n} varování: některé položky byly přeskočeny)", few = "({n} varování: některé položky byly přeskočeny)", other = "({n} varování: některé položky byly přeskočeny)" }

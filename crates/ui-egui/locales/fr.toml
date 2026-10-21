@@ -9,6 +9,16 @@ name = "Français"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "Polices manquantes"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "Ce fichier utilise des polices qui ne sont pas installées sur cet ordinateur. Leur texte est affiché dans une police de remplacement jusqu'à ce que vous les installiez."
+"{n} text layers" = { one = "{n} calque de texte", other = "{n} calques de texte" }
+"All the fonts this file uses are installed" = "Toutes les polices utilisées par ce fichier sont installées"
+"Checking the fonts installed on this computer…" = "Vérification des polices installées sur cet ordinateur…"
+"only in a text style or variable" = "uniquement dans un style de texte ou une variable"
+"Load font file…" = "Charger un fichier de police…"
+"Add font folder…" = "Ajouter un dossier de polices…"
+"Rescan fonts" = "Rechercher à nouveau les polices"
+"Look again for fonts installed since FigCraft started" = "Rechercher les polices installées depuis le démarrage de FigCraft"
 "% of all commits" = "% de tous les commits"
 "(no longer published)" = "(plus publié)"
 "({n} warnings: some entries were skipped)" = { one = "({n} avertissement : certaines entrées ont été ignorées)", other = "({n} avertissements : certaines entrées ont été ignorées)" }

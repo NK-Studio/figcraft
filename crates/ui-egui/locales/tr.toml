@@ -10,6 +10,16 @@
 name = "Türkçe"
 
 [ui]
+"Missing fonts" = "Eksik yazı tipleri"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "Bu dosya, bu bilgisayarda yüklü olmayan yazı tipleri kullanıyor. Siz yükleyene kadar bu metinler yedek bir yazı tipiyle gösterilir."
+"{n} text layers" = { other = "{n} metin katmanı" }
+"All the fonts this file uses are installed" = "Bu dosyanın kullandığı tüm yazı tipleri yüklü"
+"Checking the fonts installed on this computer…" = "Bu bilgisayarda yüklü yazı tipleri denetleniyor…"
+"only in a text style or variable" = "yalnızca bir metin stilinde veya değişkende"
+"Load font file…" = "Yazı tipi dosyası yükle…"
+"Add font folder…" = "Yazı tipi klasörü ekle…"
+"Rescan fonts" = "Yazı tiplerini yeniden tara"
+"Look again for fonts installed since FigCraft started" = "FigCraft başladıktan sonra yüklenen yazı tiplerini yeniden ara"
 "% of all commits" = "Tüm commit'lerin %'si"
 "(no longer published)" = "(artık yayımlanmıyor)"
 "({n} warnings: some entries were skipped)" = { other = "({n} uyarı: bazı girdiler atlandı)" }

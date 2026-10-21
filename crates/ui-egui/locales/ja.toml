@@ -11,6 +11,12 @@ name = "日本語"
 status = "draft — needs native review"
 
 [ui]
+"Missing fonts" = "見つからないフォント"
+"This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "このファイルは、このコンピュータにインストールされていないフォントを使用。インストールするまで、そのテキストは代替フォントで表示。"
+"{n} text layers" = { other = "{n} 個のテキストレイヤー" }
+"All the fonts this file uses are installed" = "このファイルで使われているフォントはすべてインストール済み"
+"Checking the fonts installed on this computer…" = "このコンピュータにインストールされているフォントを確認中…"
+"only in a text style or variable" = "テキストスタイルまたは変数でのみ使用"
 "% of all commits" = "全コミット中の %"
 "(no longer published)" = "（公開終了）"
 "({n} warnings: some entries were skipped)" = { other = "（警告 {n} 件：一部の項目をスキップ）" }
