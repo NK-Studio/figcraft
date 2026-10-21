@@ -115,3 +115,30 @@ fn texel_maps_hit_the_corners() {
     }
     assert!(texel_to_device([Point::ORIGIN; 3], d).is_none());
 }
+
+#[test]
+fn grown_triangles_keep_their_edges_half_a_pixel_out() {
+    use crate::spine::grown;
+    // A thin sliver as well as a plain one, either winding.
+    for t in [
+        [Point::new(0.0, 0.0), Point::new(10.0, 0.0), Point::new(0.0, 10.0)],
+        [Point::new(0.0, 0.0), Point::new(0.0, 10.0), Point::new(10.0, 0.0)],
+        [Point::new(0.0, 0.0), Point::new(100.0, 0.0), Point::new(50.0, 3.0)],
+    ] {
+        let g = grown(t, 0.5).unwrap();
+        // Every original corner lies at least 0.49 inside each moved edge (the even ones; the odd
+        // ones cut the corners).
+        for p in t {
+            for i in (0..6).step_by(2) {
+                let (a, b) = (g[i], g[(i + 1) % 6]);
+                let e = b - a;
+                if e.hypot() < 1e-9 {
+                    continue;
+                }
+                let dist = e.cross(p - a) / e.hypot();
+                assert!(dist >= 0.49, "{t:?} {g:?} edge {i}: {dist}");
+            }
+        }
+    }
+    assert!(grown([Point::ORIGIN; 3], 0.5).is_none());
+}

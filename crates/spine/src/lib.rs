@@ -10,6 +10,7 @@
 //! [`SpineError::Internal`].
 
 pub mod fixture;
+mod host;
 #[cfg(feature = "runtime")]
 mod runtime;
 #[cfg(test)]
@@ -28,8 +29,8 @@ pub const MAX_TIME: f32 = 1.0e6;
 pub enum SpineError {
     #[error("invalid Spine data: {0}")]
     Invalid(String),
-    #[error("this build has no Spine runtime")]
-    Unavailable,
+    #[error("{0}")]
+    Unavailable(String),
     #[error("Spine runtime failed: {0}")]
     Internal(String),
 }
@@ -123,43 +124,107 @@ pub struct Pose<'a> {
     pub looping: bool,
 }
 
+/// Which runtime poses a skeleton.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Runtime {
+    /// The official spine-cpp runtime of the file's version in a host process when one is
+    /// installed; otherwise the built-in runtime (4.3 only).
+    #[default]
+    Auto,
+    /// The built-in runtime (`spine2d`, Spine 4.3), in this process.
+    BuiltIn,
+    /// The official spine-cpp runtime in a host process (Spine 4.2 or 4.3).
+    Host,
+}
+
+/// The Spine versions a host can be built for.
+pub const HOST_VERSIONS: [&str; 2] = ["4.2", "4.3"];
+
+enum Backend {
+    #[cfg(feature = "runtime")]
+    BuiltIn(runtime::Loaded),
+    Host(host::Hosted),
+}
+
+/// The last pose asked for: animation, skin, time bits, looping.
+type PoseKey = (Option<String>, Option<String>, u32, bool);
+
 /// A loaded skeleton and atlas.
 pub struct Asset {
-    #[cfg(feature = "runtime")]
-    inner: runtime::Loaded,
+    backend: Backend,
     info: Info,
+    /// The last pose and its frame: a canvas draws a layer once per tile, and a host answers
+    /// over a pipe.
+    last: std::sync::Mutex<Option<(PoseKey, Frame)>>,
 }
 
 impl std::fmt::Debug for Asset {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Asset").field("info", &self.info).finish_non_exhaustive()
+        f.debug_struct("Asset").field("runtime", &self.runtime_name()).field("info", &self.info).finish_non_exhaustive()
     }
 }
 
 impl Asset {
-    /// Loads a skeleton (`binary`: a `.skel` file, else JSON) and its atlas text.
+    /// Loads a skeleton (`binary`: a `.skel` file, else JSON) and its atlas text with
+    /// [`Runtime::Auto`].
     pub fn load(skeleton: &[u8], binary: bool, atlas: &str) -> Result<Asset, SpineError> {
+        Asset::load_with(skeleton, binary, atlas, Runtime::Auto)
+    }
+
+    /// Loads a skeleton with the runtime `runtime`.
+    pub fn load_with(skeleton: &[u8], binary: bool, atlas: &str, runtime: Runtime) -> Result<Asset, SpineError> {
         if skeleton.len() > MAX_SKELETON_BYTES {
             return Err(SpineError::Invalid("skeleton file is too large".into()));
         }
         if atlas.len() > MAX_ATLAS_BYTES {
             return Err(SpineError::Invalid("atlas file is too large".into()));
         }
+        let version = skeleton_version(skeleton, binary);
+        let minor = version.as_deref().and_then(|v| HOST_VERSIONS.iter().find(|h| v.starts_with(*h))).copied();
+        let host = minor.and_then(host::host_path);
+        let use_host = match runtime {
+            Runtime::Host => true,
+            Runtime::BuiltIn => false,
+            Runtime::Auto => host.is_some() || minor != Some("4.3"),
+        };
+        if use_host {
+            let Some(minor) = minor else {
+                return Err(SpineError::Invalid(format!(
+                    "Spine {} isn't supported (export it for Spine 4.2 or 4.3)",
+                    version.as_deref().unwrap_or("of an unknown version")
+                )));
+            };
+            let exe = host.ok_or_else(|| {
+                SpineError::Unavailable(format!(
+                    "Spine {minor} skeletons need the Spine host (figcraft-spine-host-{minor}; `cargo xtask spine-host`)"
+                ))
+            })?;
+            let (h, info) = host::Hosted::load(exe, skeleton, binary, atlas)?;
+            return Ok(Asset { backend: Backend::Host(h), info, last: Default::default() });
+        }
         #[cfg(feature = "runtime")]
         {
             let inner = runtime::Loaded::load(skeleton, binary, atlas)?;
             let info = inner.info()?;
-            Ok(Asset { inner, info })
+            Ok(Asset { backend: Backend::BuiltIn(inner), info, last: Default::default() })
         }
         #[cfg(not(feature = "runtime"))]
         {
-            let _ = (skeleton, binary, atlas);
-            Err(SpineError::Unavailable)
+            Err(SpineError::Unavailable("this build has no built-in Spine runtime".into()))
         }
     }
 
     pub fn info(&self) -> &Info {
         &self.info
+    }
+
+    /// The runtime posing it (`"spine-cpp"` in a host, or `"spine2d"`).
+    pub fn runtime_name(&self) -> &'static str {
+        match &self.backend {
+            #[cfg(feature = "runtime")]
+            Backend::BuiltIn(_) => "spine2d",
+            Backend::Host(_) => "spine-cpp",
+        }
     }
 
     /// Poses the skeleton. An unknown animation or skin is an error.
@@ -175,16 +240,52 @@ impl Asset {
             return Err(SpineError::Invalid(format!("no skin named {s:?}")));
         }
         let time = if pose.time.is_finite() { pose.time.clamp(0.0, MAX_TIME) } else { 0.0 };
-        #[cfg(feature = "runtime")]
+        let pose = Pose { time, ..pose };
+        let key: PoseKey = (pose.animation.map(str::to_string), pose.skin.map(str::to_string), time.to_bits(), pose.looping);
+        let mut last = self.last.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        if let Some((k, frame)) = last.as_ref()
+            && *k == key
         {
-            self.inner.pose(Pose { time, ..pose })
+            return Ok(frame.clone());
         }
-        #[cfg(not(feature = "runtime"))]
-        {
-            let _ = time;
-            Err(SpineError::Unavailable)
-        }
+        let frame = match &self.backend {
+            #[cfg(feature = "runtime")]
+            Backend::BuiltIn(inner) => inner.pose(pose),
+            Backend::Host(h) => h.pose(pose),
+        }?;
+        *last = Some((key, frame.clone()));
+        Ok(frame)
     }
+}
+
+/// The Spine version that exported a skeleton (`"4.2.43"`), read from its header: the
+/// `skeleton.spine` field of JSON, or the string after the 8-byte hash of a binary `.skel`.
+pub fn skeleton_version(skeleton: &[u8], binary: bool) -> Option<String> {
+    if binary {
+        // A varint: the string's length plus one (0: none).
+        let mut len = 0usize;
+        let mut at = 8;
+        for shift in [0, 7, 14, 21] {
+            let b = *skeleton.get(at)?;
+            at += 1;
+            len |= usize::from(b & 0x7f) << shift;
+            if b & 0x80 == 0 {
+                break;
+            }
+        }
+        let len = len.checked_sub(1).filter(|l| *l <= 32)?;
+        let v = std::str::from_utf8(skeleton.get(at..at + len)?).ok()?;
+        return Some(v.to_string());
+    }
+    #[derive(serde::Deserialize)]
+    struct Head {
+        skeleton: Option<Skel>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Skel {
+        spine: Option<String>,
+    }
+    serde_json::from_slice::<Head>(skeleton).ok()?.skeleton?.spine
 }
 
 /// Whether JSON text looks like a Spine skeleton export (a top-level `skeleton` object next to

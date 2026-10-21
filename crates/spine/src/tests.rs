@@ -2,7 +2,7 @@ use crate::fixture::{ATLAS, SKELETON_JSON};
 use crate::*;
 
 fn asset() -> Asset {
-    Asset::load(SKELETON_JSON.as_bytes(), false, ATLAS).unwrap()
+    Asset::load_with(SKELETON_JSON.as_bytes(), false, ATLAS, Runtime::BuiltIn).unwrap()
 }
 
 #[test]
@@ -89,9 +89,9 @@ fn junk_input_never_panics() {
                 *b = (seed >> 8) as u8;
             }
         }
-        let _ = Asset::load(&bytes, false, ATLAS);
-        let _ = Asset::load(&bytes, true, ATLAS);
-        let _ = Asset::load(skel, false, ATLAS.get(..cut % ATLAS.len()).unwrap_or(""));
+        let _ = Asset::load_with(&bytes, false, ATLAS, Runtime::BuiltIn);
+        let _ = Asset::load_with(&bytes, true, ATLAS, Runtime::BuiltIn);
+        let _ = Asset::load_with(skel, false, ATLAS.get(..cut % ATLAS.len()).unwrap_or(""), Runtime::BuiltIn);
     }
     assert!(Asset::load(b"", false, "").is_err());
     assert!(Asset::load(&[0xff; 64], true, ATLAS).is_err());
@@ -103,4 +103,89 @@ fn sniffs_skeleton_json() {
     assert!(!is_skeleton_json(br#"{"name":"doc","document":{}}"#));
     assert!(!is_skeleton_json(br#"{"skeleton":{}}"#));
     assert!(!is_skeleton_json(b"\xff\xfe"));
+}
+
+#[test]
+fn reads_the_exporting_version() {
+    assert_eq!(skeleton_version(SKELETON_JSON.as_bytes(), false).as_deref(), Some("4.3.00"));
+    // A binary header: an 8-byte hash, then the version as a varint-length string.
+    let mut skel = vec![0u8; 8];
+    skel.push(7);
+    skel.extend_from_slice(b"4.2.43");
+    skel.extend_from_slice(&[1, 2, 3]);
+    assert_eq!(skeleton_version(&skel, true).as_deref(), Some("4.2.43"));
+    assert_eq!(skeleton_version(&skel[..10], true), None);
+    assert_eq!(skeleton_version(b"{}", false), None);
+}
+
+#[test]
+fn other_versions_are_refused() {
+    let old = SKELETON_JSON.replace("4.3.00", "4.1.20");
+    let e = Asset::load(old.as_bytes(), false, ATLAS).unwrap_err().to_string();
+    assert!(e.contains("4.1.20") && e.contains("4.2 or 4.3"), "{e}");
+}
+
+/// The host for `version` when one is built (`cargo xtask spine-host`); tests that need it are
+/// skipped without.
+fn host(version: &str) -> Option<std::path::PathBuf> {
+    let h = crate::host::host_path(version);
+    if h.is_none() {
+        eprintln!("no figcraft-spine-host-{version}: skipped (cargo xtask spine-host)");
+    }
+    h
+}
+
+#[test]
+fn the_host_poses_like_the_built_in_runtime() {
+    if host("4.3").is_none() {
+        return;
+    }
+    let hosted = Asset::load_with(SKELETON_JSON.as_bytes(), false, ATLAS, Runtime::Host).unwrap();
+    assert_eq!(hosted.runtime_name(), "spine-cpp");
+    let built_in = asset();
+    assert_eq!(hosted.info().animations, built_in.info().animations);
+    assert_eq!(hosted.info().skins, built_in.info().skins);
+    for (anim, t) in [(None, 0.0), (Some("wave"), 0.5), (Some("wave"), 1.0)] {
+        let pose = Pose { animation: anim, time: t, ..Pose::default() };
+        let (a, b) = (hosted.pose(pose).unwrap().bounds().unwrap(), built_in.pose(pose).unwrap().bounds().unwrap());
+        assert!(a.iter().zip(b).all(|(x, y)| (x - y).abs() < 0.01), "{anim:?} {t}: {a:?} vs {b:?}");
+    }
+    let f = hosted.pose(Pose::default()).unwrap();
+    assert!(f.batches.iter().all(|b| b.page == "figure.png" && b.indices.iter().all(|&i| (i as usize) < b.positions.len())));
+    assert!(hosted.pose(Pose { animation: Some("nope"), ..Pose::default() }).is_err());
+}
+
+#[test]
+fn damaged_files_never_reach_this_process() {
+    if host("4.3").is_none() {
+        return;
+    }
+    let skel = SKELETON_JSON.as_bytes();
+    let mut seed = 0x9e37_79b9_u32;
+    for n in 0..40 {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        let mut bytes = skel.to_vec();
+        let at = (seed as usize) % bytes.len();
+        if n % 2 == 0 {
+            bytes.truncate(at.max(1));
+        } else if let Some(b) = bytes.get_mut(at) {
+            *b = (seed >> 8) as u8;
+        }
+        if let Ok(a) = Asset::load_with(&bytes, false, ATLAS, Runtime::Host) {
+            let _ = a.pose(Pose { animation: a.info().animations.first().map(|x| x.name.as_str()), time: 0.7, looping: true, ..Pose::default() });
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_host_that_dies_is_an_error() {
+    // `false` exits at once: loading sees the host stop.
+    let e = crate::host::Hosted::load("/usr/bin/false".into(), SKELETON_JSON.as_bytes(), false, ATLAS).err().unwrap();
+    assert!(matches!(e, SpineError::Internal(_)), "{e}");
+    // `cat` echoes the request back: nonsense, not a crash.
+    let e = crate::host::Hosted::load("/bin/cat".into(), SKELETON_JSON.as_bytes(), false, ATLAS).err().unwrap();
+    assert!(matches!(e, SpineError::Internal(_)), "{e}");
 }

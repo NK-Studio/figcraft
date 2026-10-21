@@ -37,7 +37,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "spine.info",
             "Spine Skeleton Info",
-            "{id? (default the first selected Spine layer)} → {id, asset, name, version, animations: [{name, duration}], skins, pages, animation, skin, time, looping, playing, speed}",
+            "{id? (default the first selected Spine layer)} → {id, asset, name, version, runtime (spine-cpp in the Spine host, or spine2d), animations: [{name, duration}], skins, pages, animation, skin, time, looping, playing, speed}",
             false,
             info
         ),
@@ -290,7 +290,7 @@ fn info(s: &mut Session, p: &Value) -> Result<Value> {
     let name = s.doc()?.spine.get(&data.asset).map(|a| a.name.clone()).unwrap_or_default();
     let info = asset.info();
     Ok(json!({
-        "id": id, "asset": data.asset, "name": name, "version": info.version,
+        "id": id, "asset": data.asset, "name": name, "version": info.version, "runtime": asset.runtime_name(),
         "animations": info.animations, "skins": info.skins, "pages": info.pages,
         "animation": data.animation, "skin": data.skin, "time": data.time,
         "looping": data.looping, "playing": data.playing, "speed": data.speed,

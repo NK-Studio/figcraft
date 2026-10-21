@@ -10,8 +10,8 @@ workspace = true
 
 [features]
 default = ["runtime"]
-# The Spine runtime (spine2d). Without it skeletons still load as data in the document but never
-# pose: every call returns `SpineError::Unavailable`.
+# The built-in Spine 4.3 runtime (spine2d). Without it only the Spine host (official spine-cpp in a
+# process of its own, `tools/spine-host`) poses skeletons.
 runtime = ["dep:spine2d"]
 
 [dependencies]

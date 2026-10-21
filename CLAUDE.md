@@ -81,7 +81,11 @@ code.
   L6 depends on egui/eframe/rfd/winit. **The UI crate is swappable.**
 - **The UI is thin**: panels read engine state and act through `app.run(id, params)` /
   `app.set_props(ids, props)`. Colours come from `theme::Tokens`.
-- **Rust only** (no handwritten JS/TS).
+- **Rust only** (no handwritten JS/TS). One exception, approved by the owner: the Spine host
+  (`tools/spine-host/main.cpp`), a small C++ program built against the official spine-cpp so Spine
+  4.2/4.3 skeletons pose in a process of their own (`docs/spine.md`). spine-cpp itself never enters
+  the repository (`../spine-runtimes`, `cargo xtask spine-host`), and everything must build, test
+  and run without it.
 - **This fork (NK-Studio) targets macOS and Windows only.** Don't design for, test on or add
   code paths for the browser (wasm) or Linux; leave the existing web/Linux code as it is (no
   deletions). `cargo xtask wasm` still exists but isn't part of the gate.

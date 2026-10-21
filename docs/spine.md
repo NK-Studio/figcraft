@@ -1,24 +1,57 @@
 # Spine skeletons
 
-> **Last updated:** 2026-10-21 · **Change:** minor (imports take the export's folder only; Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
+> **Last updated:** 2026-10-21 · **Change:** minor (Spine 4.2 and 4.3 through the official spine-cpp in a host process; imports take the export's folder only; Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
 
-FigCraft places [Spine](https://esotericsoftware.com/) 4.3 skeleton exports as layers, poses them
+FigCraft places [Spine](https://esotericsoftware.com/) 4.2 and 4.3 skeleton exports as layers, poses them
 at an animation, skin and time, plays them in presentation and carries them into Unity exports. A
 FigCraft extension: Figma has no equivalent, and nothing here is in the menu catalog.
 
+## Runtimes
+
+Two runtimes pose skeletons, behind `crates/spine` (`Asset`, `Runtime`):
+
+- **The Spine host** (`tools/spine-host`): the official
+  [spine-cpp](https://github.com/EsotericSoftware/spine-runtimes) runtime of the file's version in
+  a process of its own, `figcraft-spine-host-4.2` or `-4.3`, one process per loaded skeleton
+  (`crates/spine/src/host.rs` drives it over pipes). It is used whenever the file's version has a
+  host. Spine 4.2 files need it.
+- **The built-in runtime**: [`spine2d`](https://crates.io/crates/spine2d) 0.5 (unofficial, pure
+  Rust, 4.3 only) in the app's process, for 4.3 files when no 4.3 host is installed.
+
+`spine.info` reports which one (`runtime`: `spine-cpp` or `spine2d`). The version comes from the
+file's header (`skeleton.spine` in JSON, the string after the hash in `.skel`); other versions are
+refused with a message to export for 4.2 or 4.3.
+
+**Why a separate process.** spine-cpp trusts its input: a damaged `.skel` can crash or hang it
+(a fuzz of the 4.2 runtime's transpiled C build crashed or hung on 30 of 30 damaged files). In its
+own process that only ends the host: a crash, a garbled answer or a request past its deadline (10 s
+to load, 3 s to pose) is an error for that layer, the host is started again for the next pose, and
+after three starts the skeleton stays unavailable. Nothing of spine-cpp runs in FigCraft's process,
+and no `unsafe` Rust is involved. The last pose of each skeleton is cached, so a canvas drawing a
+layer tile by tile asks the host once.
+
+**Building the hosts.** spine-cpp is under the Spine Runtimes License, so it never enters this
+repository. `cargo xtask spine-host` builds both hosts with CMake and a C++ compiler from one
+checkout per version in `SPINE_RUNTIMES_DIR` (default `../spine-runtimes`: `4.2/` and `4.3/`;
+`--fetch` makes sparse clones of the official repository there) and copies them beside the debug
+and release builds. The app looks for them in `FIGCRAFT_SPINE_HOST_DIR`, beside its executable, or
+one folder up. Without them everything builds, tests and runs: 4.3 files use the built-in runtime,
+4.2 files are refused with a message naming the host. Release packages don't bundle hosts yet.
+
 ## Licensing
 
-- The runtime is [`spine2d`](https://crates.io/crates/spine2d) 0.5 (MIT OR Apache-2.0, unofficial,
-  pure Rust, `#![forbid(unsafe_code)]`), wrapped by `crates/spine` so it can be swapped. Its own
-  sources say parts are ported from the official spine-cpp runtime, which is under the
+- Both runtimes come under the
   [Spine Runtimes License](https://esotericsoftware.com/spine-runtimes-license) (not an OSI
-  licence). Treat it accordingly: **everyone who uses Spine data with FigCraft needs their own Spine
-  Editor licence**, as with any Spine runtime.
-- The `runtime` feature of `figcraft-spine` (default on) is the only thing that pulls it in.
-  Without it skeletons still load and save as data, and every pose call returns
-  `SpineError::Unavailable` (nothing draws).
+  licence): spine-cpp is Esoteric Software's, and spine2d's own sources say parts are ported from
+  spine-cpp. **Everyone who uses Spine data with FigCraft needs their own Spine Editor licence**, as
+  with any Spine runtime.
+- `tools/spine-host/main.cpp` and `CMakeLists.txt` are FigCraft's own (MIT OR Apache-2.0); the
+  hosts built from them include spine-cpp and carry its licence.
+- The `runtime` feature of `figcraft-spine` (default on) is the only thing that pulls spine2d in.
+  Without it 4.3 files need the host too.
 - No Spine example exports are in the repository. Tests use a synthetic skeleton written for
-  FigCraft (`crates/spine/src/fixture.rs`: a body region and an arm mesh, one `wave` animation).
+  FigCraft (`crates/spine/src/fixture.rs`: a body region and an arm mesh, one `wave` animation);
+  the host tests run when a host is built and are skipped otherwise.
 
 ## Files and import
 
@@ -58,13 +91,16 @@ time, speed, *Loop* and *Play in presentation*.
 ## Drawing
 
 `crates/render/src/spine.rs` poses the skeleton (`figcraft_spine::Asset::pose`) and draws each
-triangle with its atlas page as a pattern under the affine map from its UVs to its corners, grown
-half a device pixel against seams. Blend modes: normal, additive (plus), multiply and screen.
+triangle with its atlas page as a pattern under the affine map from its UVs to its corners.
+Triangles under the same map fill as one path, and every edge moves half a device pixel outward
+(corners cut flat) so anti-aliased edges between neighbours leave no seams. Blend modes: normal, additive (plus), multiply and screen.
 
 - On the canvas and in exports a layer shows its pose at `time`. In presentation a playing layer
   advances at `speed` from `time` (the presenter's clock, 60 frames a second, the same path as
   animated GIFs).
-- Physics constraints are not simulated (a pose is a pure function of its time).
+- Physics: the host simulates physics constraints from the start of the animation in steps of
+  1/30 s (at most 60 s of it), so a pose is still a function of its time; the built-in runtime
+  doesn't simulate physics.
 - Vertex tint is applied as opacity only; RGB tint and two-colour (dark) tint are not drawn yet.
   Premultiplied-alpha pages are treated as straight alpha.
 - Animations can reach past the setup-pose box: the layer's paint bounds are its box grown by its

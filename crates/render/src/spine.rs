@@ -125,25 +125,16 @@ impl Run {
         (self.opacity - opacity).abs() < 1e-4 && self.map.as_coeffs().iter().zip(m.as_coeffs()).all(|(a, b)| (a - b).abs() <= 1e-4 * (1.0 + a.abs()))
     }
 
-    /// Fills the triangles, each grown half a device pixel from its centroid so they also overlap
-    /// the anti-aliased edges of neighbours in other runs. Every triangle is wound the same way so
-    /// overlaps add up instead of cancelling.
+    /// Fills the triangles, each grown half a device pixel ([`grown`]) so they also cover the
+    /// anti-aliased edges of neighbours in other runs.
     fn fill(&self, pix: &mut Pixmap, page: &Pixmap, blend: BlendMode) {
         let mut pb = PathBuilder::new();
         for d in &self.tris {
-            let centre = Point::new((d[0].x + d[1].x + d[2].x) / 3.0, (d[0].y + d[1].y + d[2].y) / 3.0);
-            let grow = |p: Point| {
-                let v = p - centre;
-                let len = v.hypot();
-                if len > 1e-6 { p + v * (0.5 / len) } else { p }
-            };
-            let [a, mut b, mut c] = d.map(grow);
-            if (b - a).cross(c - a) < 0.0 {
-                std::mem::swap(&mut b, &mut c);
+            let Some(g) = grown(*d, 0.5) else { continue };
+            pb.move_to(g[0].x as f32, g[0].y as f32);
+            for p in &g[1..] {
+                pb.line_to(p.x as f32, p.y as f32);
             }
-            pb.move_to(a.x as f32, a.y as f32);
-            pb.line_to(b.x as f32, b.y as f32);
-            pb.line_to(c.x as f32, c.y as f32);
             pb.close();
         }
         let Some(path) = pb.finish() else { return };
@@ -175,6 +166,35 @@ pub(crate) fn texel_to_device(t: [Point; 3], d: [Point; 3]) -> Option<Affine> {
     let off = d[0] - lin * t[0];
     let out = Affine::new([m[0], m[1], m[2], m[3], off.x, off.y]);
     out.as_coeffs().iter().all(|c| c.is_finite()).then_some(out)
+}
+
+/// Triangle `d` with every edge moved `r` outward, the corners cut flat (a hexagon), wound
+/// counter-clockwise on screen so the triangles of a path add up instead of cancelling. `None`
+/// for a degenerate triangle.
+pub(crate) fn grown(d: [Point; 3], r: f64) -> Option<[Point; 6]> {
+    let [a, mut b, mut c] = d;
+    let area = (b - a).cross(c - a);
+    if !area.is_finite() || area.abs() < 1e-12 {
+        return None;
+    }
+    if area < 0.0 {
+        std::mem::swap(&mut b, &mut c);
+    }
+    let pts = [a, b, c];
+    // Outward unit normal of the edge from p to q (counter-clockwise: the right-hand side).
+    let normal = |p: Point, q: Point| {
+        let e = q - p;
+        let len = e.hypot();
+        if len > 1e-12 { figcraft_geom::Vec2::new(e.y / len, -e.x / len) } else { figcraft_geom::Vec2::ZERO }
+    };
+    let mut out = [Point::ORIGIN; 6];
+    for i in 0..3 {
+        let (cur, next) = (pts[i], pts[(i + 1) % 3]);
+        let n = normal(cur, next) * r;
+        out[2 * i] = cur + n;
+        out[2 * i + 1] = next + n;
+    }
+    Some(out)
 }
 
 /// Where playing Spine skeletons are `t` seconds in, at 60 frames a second: a frame number (a
