@@ -391,3 +391,40 @@ fn the_short_side_preset_and_scaler_params() {
         assert!(s.execute("unity.canvasScaler.set", &bad).is_err(), "{bad}");
     }
 }
+
+#[test]
+fn a_safe_area_window_comes_back_after_a_device_without_one() {
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"text": unity_device("Notch Phone").to_string()})).unwrap();
+    let mut flat = unity_device("Flat Phone");
+    flat["screens"][0]["width"] = json!(640);
+    flat["screens"][0]["height"] = json!(1136);
+    flat["screens"][0]["orientations"][0]["safeArea"] = json!({"x": 0.0, "y": 0.0, "width": 640.0, "height": 1136.0});
+    flat["screens"][0]["orientations"][0]["cutouts"] = json!([]);
+    flat["screens"][0]["orientations"][1]["safeArea"] = json!({"x": 0.0, "y": 0.0, "width": 1136.0, "height": 640.0});
+    s.execute("device.import", &json!({"text": flat.to_string()})).unwrap();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/notch-phone"})).unwrap();
+    // Notch phone: 400 × 866.67 pt, safe area 50..836.67. A window on it (a SafeArea container)
+    // and a background bleeding under the bars.
+    let bg = node_id(&s.execute("shape.rectangle", &json!({"x": 0, "y": 0, "width": 400, "height": 866.6667, "parent": f})).unwrap());
+    let win = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 50, "width": 400, "height": 786.6667, "parent": f})).unwrap());
+    for id in [bg, win] {
+        s.execute("node.set", &json!({"id": id, "props": {"constraints": {"horizontal": "leftRight", "vertical": "topBottom"}}})).unwrap();
+    }
+    let n = |s: &Session, id| s.doc().unwrap().node(id).unwrap().clone();
+    let top = |s: &Session, id| n(s, id).transform.as_coeffs()[5];
+    // A device without a safe area: the window fills the screen, like the background.
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/flat-phone"})).unwrap();
+    assert!(top(&s, win).abs() < 1e-3 && (n(&s, win).height - n(&s, f).height).abs() < 1e-3);
+    assert!(n(&s, win).follows_safe_area && !n(&s, bg).follows_safe_area);
+    // Back on the notch phone the window is on the safe area again; the background isn't.
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/notch-phone"})).unwrap();
+    assert!((top(&s, win) - 50.0).abs() < 1e-3 && (n(&s, win).height - 786.6667).abs() < 1e-2, "{} {}", top(&s, win), n(&s, win).height);
+    assert!(top(&s, bg).abs() < 1e-3 && (n(&s, bg).height - 866.6667).abs() < 1e-2);
+    // The mark can be set by hand (a file from before it was kept) and goes with node.get.
+    s.execute("node.set", &json!({"id": bg, "props": {"followsSafeArea": true}})).unwrap();
+    assert!(n(&s, bg).follows_safe_area);
+    assert_eq!(s.execute("node.get", &json!({"id": bg})).unwrap()["followsSafeArea"], true);
+    assert!(s.execute("node.set", &json!({"id": bg, "props": {"followsSafeArea": 3}})).is_err());
+}

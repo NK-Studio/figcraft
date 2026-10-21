@@ -324,3 +324,15 @@ fn scale_lengths_skips_quotes_and_words() {
     assert_eq!(super::export::scale_lengths_for_tests("\"Font 12px\" -50% h1px", 2.0), "\"Font 12px\" -50% h1px");
     assert_eq!(super::export::scale_lengths_for_tests("url(\"images/1px.png\") 4pxa", 2.0), "url(\"images/1px.png\") 4pxa");
 }
+
+#[test]
+fn a_layer_marked_as_following_the_safe_area_goes_in_the_container_on_a_screen_without_one() {
+    let (mut d, f) = screen();
+    d.get_mut(f).unwrap().device = Some(DeviceFrame { width: 400.0, height: 800.0, ..Default::default() });
+    d.create(f, NodeKind::Rectangle, "Background", 0.0, 0.0, 400.0, 800.0).unwrap();
+    let win = d.create(f, NodeKind::Frame, "Window", 0.0, 0.0, 400.0, 800.0).unwrap();
+    d.get_mut(win).unwrap().follows_safe_area = true;
+    let x = export(&d, &[f], opts(0)).documents[0].uxml.clone();
+    let sa = x.find("<FigCraft.PanelSafeArea").unwrap();
+    assert!(x.find("name=\"Background\"").unwrap() < sa && x.find("name=\"Window\"").unwrap() > sa, "{x}");
+}

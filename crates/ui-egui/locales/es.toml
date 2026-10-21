@@ -8,6 +8,7 @@ name = "Español"
 status = "draft — needs native review"
 
 [ui]
+"Follows the safe area" = "Sigue el área segura"
 "Add font folder" = "Añadir carpeta de fuentes"
 "Add font folder…" = "Añadir carpeta de fuentes…"
 "Compatibility notes" = "Notas de compatibilidad"

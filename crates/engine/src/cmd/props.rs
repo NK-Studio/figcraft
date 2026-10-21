@@ -717,6 +717,9 @@ pub fn apply(cmd: &str, doc: &mut Document, id: NodeId, props: &Map<String, Valu
             "overflow" => doc.get_mut(id)?.overflow = enum_of(v).ok_or_else(|| bad(cmd, "overflow: none|horizontal|vertical|both"))?,
             "scrollPosition" => doc.get_mut(id)?.scroll_position = enum_of(v).ok_or_else(|| bad(cmd, "scrollPosition: scrolls|fixed|sticky"))?,
             "constrainProportions" => doc.get_mut(id)?.constrain_proportions = v.as_bool().unwrap_or(false),
+            "followsSafeArea" => {
+                doc.get_mut(id)?.follows_safe_area = v.as_bool().ok_or_else(|| bad(cmd, "`followsSafeArea` must be true or false"))?
+            }
             "characters" | "text" => {
                 let s = string_val(v).ok_or_else(|| bad(cmd, "`characters` must be a string"))?;
                 let n = doc.get_mut(id)?;

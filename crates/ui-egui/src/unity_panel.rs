@@ -109,6 +109,19 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
     if info.position == Position::Absolute {
         pivot_row(app, ui, sel, info.pivot, info.pivot_set);
     }
+    // Children of a device frame: whether they go in the panel safe area container and follow the
+    // safe area when the device changes (decided from the box; this settles a layer that fills a
+    // screen without a safe area, where a SafeArea container looks like a background).
+    let in_device = doc.node(first).and_then(|n| n.parent).and_then(|p| doc.node(p)).is_some_and(|p| p.device.is_some());
+    if in_device {
+        let marked = doc.node(first).is_some_and(|n| n.follows_safe_area);
+        row(ui, 28.0, |ui| {
+            if widgets::checkbox(ui, marked, tr("Follows the safe area")) {
+                let ids: Vec<NodeId> = sel.to_vec();
+                app.set_props(&ids, json!({"followsSafeArea": !marked}));
+            }
+        });
+    }
     if info.position == Position::Root && doc.node(first).is_some_and(|n| n.kind.is_frame_like()) {
         canvas_scaler_rows(app, ui, doc, first);
     }

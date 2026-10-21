@@ -288,7 +288,8 @@ child in a frame with a 3 pt border.
   device changes (`frame.device.set`, `frame.swapOrientation`), by their constraints — what the
   panel safe area container does in Unity; before, FigCraft placed them against the whole frame (the
   bottom-pinned button was 34 pt off on Pixel 5). Layers flush with a frame edge bleed and follow
-  the frame (`DeviceFrame::holds`, shared by both).
+  the frame (`DeviceFrame::follows`, shared by both: the box rule, plus the layer's safe area
+  mark for screens without a safe area; `docs/device-profiles.md`).
 
 **Running it:** a runtime panel only lays out while the Game view renders, so the harness brings
 the Editor to the front (`editor_focus`) before each device and waits for the root to reach the

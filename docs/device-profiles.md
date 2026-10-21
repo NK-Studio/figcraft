@@ -162,7 +162,14 @@ without the profile or Unity installed.
   area by their constraints, as Unity's SafeArea container places them; other layers follow the
   frame (`DeviceFrame::holds`). A layer flush with a frame edge bleeds (backgrounds), unless it also
   lies on an inset edge of the safe area (a window a SafeArea component sizes, under the notch).
-  With a canvas scaler on the frame (`docs/unity-uitk.md` › Canvas scaler) everything scales first.
+  A layer placed on the safe area this way is marked (`Node::follows_safe_area`, `followsSafeArea`
+  in `node.set`/`node.get`; *Follows the safe area* in the Design tab's Unity section for children
+  of device frames): on a device without a safe area (iPod touch) it fills the screen like a
+  background, and the mark brings it back onto the safe area on the next device that has one
+  (`DeviceFrame::follows`: holds, or marked and within the safe area). A marked layer moved out of
+  the safe area loses the mark at the next change. Files from before the mark keep working; a
+  window saved while filling such a screen needs the checkbox once. With a canvas scaler on the
+  frame (`docs/unity-uitk.md` › UI scaling) everything scales first.
 - **Orientation**: `frame.swapOrientation` turns a device frame's snapshot too (portrait, else
   upside down ⇄ landscape left, else right) when the profile is imported; otherwise it drops the
   device with a message, since the turned safe area isn't known.

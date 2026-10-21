@@ -184,6 +184,7 @@ node_props! {
     Device => device,
     Pivot => pivot,
     CanvasScaler => canvas_scaler,
+    FollowsSafeArea => follows_safe_area,
 }
 
 /// A document-level property. Lists of entries with ids (styles, comments, variable collections,

@@ -663,6 +663,22 @@ impl DeviceFrame {
             && y + ch <= s.y + s.height + SLACK
     }
 
+    /// Whether a `cw × ch` layer at (`x`, `y`) in a `w × h` frame follows the safe area: it
+    /// [holds](Self::holds) there, or it's marked as following it (`Node::follows_safe_area`) and
+    /// lies within it. The mark settles what the box can't: on a screen without a safe area a
+    /// SafeArea container fills the screen like a background does.
+    #[allow(clippy::too_many_arguments)]
+    pub fn follows(&self, w: f64, h: f64, x: f64, y: f64, cw: f64, ch: f64, marked: bool) -> bool {
+        const SLACK: f64 = 0.5;
+        let s = self.safe_rect_for(w, h);
+        let within = [x, y, cw, ch].iter().all(|v| v.is_finite())
+            && x >= s.x - SLACK
+            && y >= s.y - SLACK
+            && x + cw <= s.x + s.width + SLACK
+            && y + ch <= s.y + s.height + SLACK;
+        self.holds(w, h, x, y, cw, ch) || (marked && within)
+    }
+
     /// The screen's corner radius for a `w × h` frame.
     pub fn corner_radius_for(&self, w: f64, h: f64) -> f64 {
         if self.corner_radius.is_finite() { self.corner_radius.clamp(0.0, w.min(h).max(0.0) / 2.0) } else { 0.0 }
@@ -803,6 +819,11 @@ pub struct Node {
     /// contents scale as Unity's canvas does, then their constraints take up what's left.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canvas_scaler: Option<CanvasScaler>,
+    /// Children of device frames: the layer follows the safe area (a SafeArea container), noted
+    /// whenever a device change places it there, so a device without a safe area (where it fills
+    /// the screen like a background) doesn't make it lose that ([`DeviceFrame::follows`]).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub follows_safe_area: bool,
 }
 
 pub(crate) fn yes() -> bool {
@@ -916,6 +937,7 @@ impl Node {
             device: None,
             pivot: None,
             canvas_scaler: None,
+            follows_safe_area: false,
         }
     }
 

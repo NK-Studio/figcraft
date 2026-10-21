@@ -430,12 +430,14 @@ pub(crate) struct SafeFollowers {
     old_density: figcraft_doc::ScreenDensity,
     /// (layer, x, y, width, height) in the frame.
     layers: Vec<(NodeId, f64, f64, f64, f64)>,
+    /// Marked as following the safe area but now outside it (moved away): the mark goes.
+    unmarked: Vec<NodeId>,
 }
 
 pub(crate) fn safe_followers(doc: &figcraft_doc::Document, frame: NodeId) -> Option<SafeFollowers> {
     let n = doc.node(frame)?;
     let old = n.device.as_ref()?;
-    let mut layers = Vec::new();
+    let (mut layers, mut unmarked) = (Vec::new(), Vec::new());
     for c in n.children.iter().filter_map(|c| doc.node(*c)) {
         // Layers in an auto layout flow move with the layout; turned layers keep the resize's place.
         let in_flow = n.layout.is_some() && !c.child_layout.absolute;
@@ -443,11 +445,20 @@ pub(crate) fn safe_followers(doc: &figcraft_doc::Document, frame: NodeId) -> Opt
             continue;
         }
         let at = figcraft_geom::translation(c.transform);
-        if old.holds(n.width, n.height, at.x, at.y, c.width, c.height) {
+        if old.follows(n.width, n.height, at.x, at.y, c.width, c.height, c.follows_safe_area) {
             layers.push((c.id, at.x, at.y, c.width, c.height));
+        } else if c.follows_safe_area {
+            unmarked.push(c.id);
         }
     }
-    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), old_size: (n.width, n.height), old_density: old.density(), layers })
+    Some(SafeFollowers {
+        frame,
+        old_safe: old.safe_rect_for(n.width, n.height),
+        old_size: (n.width, n.height),
+        old_density: old.density(),
+        layers,
+        unmarked,
+    })
 }
 
 /// One axis of a constraint from a box `from` long to one `to` long: the new position and size.
@@ -501,6 +512,12 @@ fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &D
         props.insert("width".into(), json!(r4(nw)));
         props.insert("height".into(), json!(r4(nh)));
         crate::cmd::props::apply("frame.device.set", doc, id, &props)?;
+        // Kept on the layer: on a screen without a safe area it fills the screen like a
+        // background, and the mark tells them apart when the next device has one.
+        doc.get_mut(id)?.follows_safe_area = true;
+    }
+    for &id in &f.unmarked {
+        doc.get_mut(id)?.follows_safe_area = false;
     }
     Ok(())
 }

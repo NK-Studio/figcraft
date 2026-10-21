@@ -11,6 +11,7 @@ name = "日本語"
 status = "draft — needs native review"
 
 [ui]
+"Follows the safe area" = "セーフエリアに従う"
 "Missing fonts" = "見つからないフォント"
 "This file uses fonts that aren't installed on this computer. Their text is drawn in a fallback font until you install them." = "このファイルは、このコンピュータにインストールされていないフォントを使用。インストールするまで、そのテキストは代替フォントで表示。"
 "{n} text layers" = { other = "{n} 個のテキストレイヤー" }

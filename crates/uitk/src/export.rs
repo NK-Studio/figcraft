@@ -479,7 +479,7 @@ impl Writer<'_> {
         let i = d.insets_for(n.width, n.height);
         let inside = |c: &Node| {
             let (p, _) = local_box(c);
-            d.holds(n.width, n.height, p.x, p.y, c.width, c.height)
+            d.follows(n.width, n.height, p.x, p.y, c.width, c.height, c.follows_safe_area)
         };
         let flow = n.layout.is_some();
         let (mut outside, mut within) = (Vec::new(), Vec::new());
