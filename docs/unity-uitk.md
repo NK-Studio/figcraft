@@ -51,11 +51,11 @@ table is rechecked when it ships.
 
 - Both sides measure from the **top-left**, y down. UITK uses border-box sizing, like FigCraft
   frames with strokes inside.
-- **1 UITK px = 1 FigCraft point = 1 device point.** A FigCraft device frame is the device screen in
-  points; in Unity the panel's scale is set so the panel is the same size in its own px:
-  `panelSettings.scale = Screen.width / frameWidthPt` (equivalently, the device scale factor). The
-  Scale With Screen Size / reference resolution modes don't give per-device equality and aren't the
-  sync target (they can still be used for other UI).
+- **Panel units come from the frame's UI scaling** ([UI scaling](#ui-scaling)). A FigCraft device
+  frame is the device screen in points; the export writes lengths in the panel units the frame's
+  scaling gives on that screen (`units per point`), and Unity's PanelSettings takes the same
+  scaling, so the panel lays out the same on every device. Without a setting a frame exports as its
+  short side (1 UITK px = 1 point on the design device).
 - **Safe area:** UITK doesn't apply it. The export wraps the content of a device frame in a
   *panel safe area container* whose padding is `Screen.safeArea` converted to panel coordinates
   (`RuntimePanelUtils.ScreenToPanel`), which is exactly what FigCraft draws on device frames.
@@ -190,7 +190,7 @@ writes, and the Design tab's Unity section has *Export to Unity…* (a folder pi
 <dir>/<Frame>.uss           one rule per layer: .<block>__<layer id> { … }   (block: the frame's name in kebab case)
 <dir>/images/<hash>.<ext>   image fills, as stored
 <dir>/images/baked-<id>.png layers the target version can't draw (rendered at `scale`, 2 by default)
-<dir>/DesignPanelScaler.cs
+<dir>/<Frame>.panelsettings.json   the frame's UI scaling, for Unity's PanelSettings
 ```
 
 **Elements.** Frames, groups, rectangles → `ui:VisualElement`; text → `ui:Label` (its text in
@@ -239,12 +239,10 @@ at run time the element follows `Screen.safeArea`; in the UI Builder it shows th
 
 **In Unity.** Copy the folder into `Assets/` and show `<Frame>.uxml` on a GameObject with a
 **`PanelRenderer`** from Unity 6.5 (`UIDocument` isn't used there; it's the 6.0–6.4 path), with its
-PanelSettings (a runtime theme), and add `DesignPanelScaler` (set `designWidth` to the frame's
-portrait width in points; it switches the PanelSettings to Constant Pixel Size with
-`scale = short screen side / designWidth`) next to it. The script picks the component by version
-(`#if UNITY_6000_5_OR_NEWER`): a `PanelRenderer` on 6.5+, a `UIDocument` before. It is the same in
-every export: keep one copy per project. Device frames need the **`com.nkstudio.figcraft`** package
-(see below) for their `PanelSafeArea`. Fonts are the
+PanelSettings `<Frame>PanelSettings.asset`, which the **`com.nkstudio.figcraft`** package (see
+below) makes from `<Frame>.panelsettings.json` when it is imported (and updates on each export;
+the theme and other fields set by hand stay). No script: the scaling is Unity's own. Device frames
+also need the package for their `PanelSafeArea`. Fonts are the
 project's: each label carries `--design-font-family` and `--design-font-style` for a project style sheet
 to map to font assets. Exported images must import as **Texture (Default)** or as a single Sprite
 with a full-rect mesh: a project that imports PNGs as Sprites (Multiple, tight mesh) trims their
@@ -297,34 +295,66 @@ device's size.
 halving, and the scripts on a real device (the run set the SafeArea the way `PanelSafeAreaApplier`
 does rather than through the Device Simulator).
 
-## Canvas scaler
+## UI scaling
 
-Unity UI built with uGUI usually sits on a canvas with a **CanvasScaler** in *Scale With Screen
-Size* mode: on a bigger or smaller screen the whole canvas scales, and anchors only take up what's
-left. Constraints alone (FigCraft's model) don't do that, so a screen brought over from Unity broke
-on a wider device (layers anchored to a corner kept their size). A frame can now carry one:
-`Node::canvas_scaler: Option<CanvasScaler {referenceWidth, referenceHeight, screenMatchMode
-(matchWidthOrHeight | expand | shrink), matchWidthOrHeight}>` (`unity.canvasScaler.set`; null or
-`clear` removes it; the Design tab's Unity section for top-level frames; saved and synced).
+Unity UI sits on a canvas (uGUI **CanvasScaler**) or a panel (UI Toolkit **PanelSettings**) with a
+scale mode; FigCraft frames carry the same setting so the design behaves as Unity will on every
+device: `Node::canvas_scaler: Option<CanvasScaler {scaleMode (constantPixelSize |
+scaleWithScreenSize | constantPhysicalSize), scaleFactor, referenceWidth, referenceHeight,
+screenMatchMode (matchWidthOrHeight | expand | shrink), matchWidthOrHeight, referenceDpi,
+fallbackDpi}>` (`unity.canvasScaler.set`, with `preset: "shortSide"`; `clear` removes it; the
+Design tab's Unity section for top-level frames, *UI scaling*; saved and synced).
 
-When such a frame changes size (W/H, a size preset, `frame.device.set`, `frame.swapOrientation`),
-`resize_node` first scales everything in it by `k = u(new) / u(old)` — the Scale tool's scaling:
-sizes, positions, text, strokes, effects, radii, spacing — then applies the constraints from
-`old × k` to the new size. `u` is Unity's scale factor in points per canvas unit, which doesn't
-depend on the screen's pixels per point: `expand` → `min(w / refW, h / refH)`, `shrink` → `max`,
-`matchWidthOrHeight` → `(w / refW)^(1−m) · (h / refH)^m`. Layers following the safe area are scaled
-the same way before their constraints place them on the new safe area.
+| Mode | Unity | Points per unit `u` |
+|---|---|---|
+| Scale With Screen Size | the canvas follows the screen against a reference resolution | `expand` `min(w / refW, h / refH)`, `shrink` `max`, `matchWidthOrHeight` `(w / refW)^(1−m) · (h / refH)^m` |
+| Constant Pixel Size | a unit is a pixel | `1 / pixels per point` |
+| Constant Physical Size | a unit keeps its physical size | `dpi / referenceDpi / pixels per point` (`fallbackDpi` when the screen gives no dpi) |
+| **Short side** (preset) | Scale With Screen Size, a square `s × s` reference, Expand | `min(w, h) / s`: the short side is `s` units on every screen and in both orientations (rotation-safe) |
 
-The ArrowsAndCats card show (Unity 6.0, 1080 × 1920 Expand) imported this way keeps its layout from
-iPhone 12 mini to iPhone 13 Pro Max.
+`scaleFactor` (uGUI `scaleFactor`, UI Toolkit `PanelSettings.scale`) multiplies every mode. Device
+frames keep the screen's pixels per point and dpi (`DeviceFrame::pixels_per_point`, `dpi`) for the
+pixel-based modes. Constant Physical Size follows PanelSettings (`referenceDpi`, 96 by default);
+uGUI's physical mode instead counts a point at 72 dpi.
+
+When such a frame changes size or device (W/H, a size preset, `frame.device.set`,
+`frame.swapOrientation`), its contents scale by `k = u(new) / u(old)` — the Scale tool's scaling:
+sizes, positions, text, strokes, effects, radii, spacing — then the constraints apply from `old × k`
+to the new size. Scale With Screen Size depends on the size, the pixel modes on the density (a plain
+resize leaves them alone; a device change scales by the density change). Layers following the safe
+area are scaled the same way before their constraints place them on the new safe area.
+
+**Export.** Each frame's scaling goes to `<Frame>.panelsettings.json` with Unity's names
+(`scaleMode`, `scale`, `referenceResolution` in whole units, `screenMatchMode`, `match`,
+`referenceDpi`, `fallbackDpi`), and every length in the USS and UXML is multiplied by the design
+screen's units per point (`1 / u`): a 375-pt-wide screen with 1080 × 1920 Expand exports at
+2.88 units per point, as the game's own canvas has it. A frame without a setting exports as its
+short side (`source: "shortSide"`, 1 unit per point). The pixel-based modes need a device on the
+frame to work units out; without one the check warns (`ui-scaling`) and the export uses 1 unit per
+point.
+
+**Check in Unity 6.6** (edit mode, no Play; the ArrowsAndCats card show, its game's 1080 × 1920
+Expand, exported by FigCraft and its PanelSettings made by the package; elements' `worldBound`
+against FigCraft's layers after `frame.device.set`):
+
+| Device | Panel (units) | Within 0.5 pt | Within 1 pt |
+|---|---|---|---|
+| iPhone 12 mini | 1080 × 2338 | 102/102 | 102/102 |
+| iPhone X | 1080 × 2338.56 | 102/102 | 102/102 |
+| iPhone 13 Pro Max | 1080 × 2336.64 | 99/102 | 102/102 |
+| iPad Mini 4 | 1440 × 1920 | 67/102 | 102/102 |
+
+The iPad differences (≤ 0.82 pt) are Unity rounding the layout to pixels at a 1.33× panel scale.
+Changing the settings file and reimporting updates the asset and the panel at once (Constant Pixel
+Size ×3 on iPhone X: 375 × 812).
 
 ## FigCraft Unity package
 
 **Principle: nothing that only works at run time.** Everything an export needs must show in the
 Editor without pressing Play — the Game view, the Device Simulator when the device changes, and the
 UI Builder where it can — and behave the same at run time. Scripts in `Update()` break that (Play
-only): the safe area script is gone; `DesignPanelScaler`, which also writes into the PanelSettings
-asset (whose stale value then stays in edit mode), goes when the scaling setting lands.
+only): both generated scripts are gone (the safe area is an element, the scaling Unity's
+PanelSettings written by an editor importer).
 
 The Unity side becomes a UPM package, **`com.nkstudio.figcraft`** (its own repository, not this
 Rust repo), replacing the generated scripts. Code style there and in the generated scripts: every
@@ -334,7 +364,7 @@ are qualified so they don't collide with other packages (`PanelSafeArea`, not `S
 
 | Need | How (works in edit mode, Simulator, run time) |
 |---|---|
-| UI scaling per frame | Native settings, no script: the frame's scaling (Constant Pixel Size / Scale With Screen Size / Constant Physical Size, reference resolution, Match / Expand / Shrink) written into the **PanelSettings asset** (UI Toolkit) or **CanvasScaler** (uGUI) by the package's editor importer from a settings file in the export |
+| UI scaling per frame | **Landed (0.2.0):** `PanelSettingsImporter` (editor): `<Frame>.panelsettings.json` → `<Frame>PanelSettings.asset` (scale mode, scale, reference resolution, match, dpi; theme and other fields kept; a new asset takes the project's runtime theme). Files imported before the package compiled are picked up when the editor loads. uGUI's CanvasScaler: later |
 | Safe area | **Landed (0.1.0):** `PanelSafeArea`, a custom `VisualElement` (`[UxmlElement]`): absolute in its parent, insets where `Screen.safeArea` falls in the parent's padding box (so any parent works), on geometry changes and a 200 ms check (devices with the same panel size, a parent that moves); `exclude-top/right/bottom/left`; `design-inset-*` in the UI Builder |
 | Breakpoints (media query stand-in) | **Landed (0.1.0):** `PanelBreakpoints`: classes `panel-breakpoints--compact/--medium/--expanded` (width ≥ 600 / 840 panel units, attributes `medium-width`, `expanded-width`) and `--portrait/--landscape` from its parent's size, which its classes can't change (no feedback loop), with a `hysteresis` band (8); a `Changed` event for code. USS switches layouts with `.panel-breakpoints--expanded .card-grid { … }` |
 | `gap` before 6.7 | `FlexGapContainer` (`gap` attribute): spaces its visible children (wrap, reverse, children added, removed or hidden); native `gap` on 6.7+; a migration tool turns it into a plain element with `gap` |

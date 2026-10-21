@@ -7,13 +7,14 @@ mod export;
 #[cfg(test)]
 mod export_tests;
 mod layer;
-pub mod scripts;
+mod panel;
 #[cfg(test)]
 mod tests;
 
 pub use check::{CheckOptions, Issue, Severity, check};
 pub use export::{Bake, Export, ExportOptions, ImageFile, UitkDocument, export};
 pub use layer::{LayerInfo, Position, file_export_options, file_options, implied_pivot, layer_info};
+pub use panel::{PanelScaling, PanelSettingsFile, WholeSize, panel_scaling};
 
 use serde::{Serialize, Serializer};
 

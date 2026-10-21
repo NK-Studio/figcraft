@@ -65,8 +65,8 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!("frame.device.clear", "Clear Frame Device", "{ids? (default the selection)}", true, frame_device_clear),
         spec!(
             "unity.canvasScaler.set",
-            "Set Canvas Scaler",
-            "{ids? (frames; default the selection), referenceResolution? ([w, h] in canvas units, default 1080 × 1920), screenMatchMode? (\"matchWidthOrHeight\" | \"expand\" | \"shrink\"), match? (0 width … 1 height)} → {ids, canvasScaler}: the frames' contents scale as Unity's Scale With Screen Size canvas when they change size; null clears",
+            "Set UI Scaling",
+            "{ids? (frames; default the selection), preset? (\"shortSide\": Scale With Screen Size against a square reference with Expand, rotation-safe), shortSide? (the preset's side in units, default the frame's short side), scaleMode? (\"constantPixelSize\" | \"scaleWithScreenSize\" | \"constantPhysicalSize\"), scaleFactor? (multiplies every mode, 0.01–100), referenceResolution? ([w, h] in canvas units, default 1080 × 1920), screenMatchMode? (\"matchWidthOrHeight\" | \"expand\" | \"shrink\"), match? (0 width … 1 height), referenceDpi?, fallbackDpi? (1–2000, default 96), clear?} → {ids, canvasScaler}: Unity's UI scaling on the frames (uGUI CanvasScaler, UI Toolkit PanelSettings); their contents scale as Unity's canvas does when they change size or device; `referenceResolution: null` or `clear` removes it",
             true,
             canvas_scaler_set
         ),
@@ -317,6 +317,8 @@ fn frame_snapshot(d: &DeviceProfile, sc: &Screen, o: Orientation) -> DeviceFrame
         safe_area: SideInsets { top: r4(i.top), right: r4(i.right), bottom: r4(i.bottom), left: r4(i.left) },
         cutouts: sc.cutouts_pt(o).iter().map(|c| BoxRect { x: r4(c.x), y: r4(c.y), width: r4(c.width), height: r4(c.height) }).collect(),
         corner_radius: r4(sc.corner_radius_px / sc.scale),
+        pixels_per_point: sc.scale,
+        dpi: sc.dpi.unwrap_or(0.0),
     }
 }
 
@@ -352,6 +354,20 @@ fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
     // does in Unity): noted before the frame resizes, placed against the new one after.
     let followers: Vec<SafeFollowers> = if resize { ids.iter().filter_map(|i| safe_followers(s.doc().ok()?, *i)).collect() } else { Vec::new() };
     if resize {
+        // Constant Pixel Size and Constant Physical Size scale with the screen's density, not its
+        // size: the contents take the new density's scale first (the frame with them, so that
+        // the resize below only applies constraints), as Unity's canvas does.
+        let doc = s.doc_mut()?;
+        for i in &ids {
+            let n = doc.get(*i)?;
+            let (Some(c), Some(old)) = (n.canvas_scaler, n.device.as_ref()) else { continue };
+            let (w, h) = (n.width, n.height);
+            let k = c.factor((w, h, old.density()), (w, h, snap.density()));
+            if (k - 1.0).abs() > 1e-9 {
+                super::props::scale_canvas_contents(doc, *i, k)?;
+                figcraft_layout::set_size(doc, *i, w * k, h * k);
+            }
+        }
         for i in &ids {
             super::arrange::resize_cmd(s, &json!({"ids": [i], "width": snap.width, "height": snap.height}))?;
         }
@@ -411,6 +427,7 @@ pub(crate) struct SafeFollowers {
     old_safe: BoxRect,
     /// The frame's size before the change (a canvas scaler scales the layers by the change).
     old_size: (f64, f64),
+    old_density: figcraft_doc::ScreenDensity,
     /// (layer, x, y, width, height) in the frame.
     layers: Vec<(NodeId, f64, f64, f64, f64)>,
 }
@@ -430,7 +447,7 @@ pub(crate) fn safe_followers(doc: &figcraft_doc::Document, frame: NodeId) -> Opt
             layers.push((c.id, at.x, at.y, c.width, c.height));
         }
     }
-    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), old_size: (n.width, n.height), layers })
+    Some(SafeFollowers { frame, old_safe: old.safe_rect_for(n.width, n.height), old_size: (n.width, n.height), old_density: old.density(), layers })
 }
 
 /// One axis of a constraint from a box `from` long to one `to` long: the new position and size.
@@ -459,7 +476,7 @@ fn place_followers(doc: &mut figcraft_doc::Document, f: &SafeFollowers, snap: &D
     let new_safe = snap.safe_rect_for(n.width, n.height);
     let (o, s) = (f.old_safe, new_safe);
     // With a canvas scaler the layers (and the old safe area with them) were scaled first.
-    let k = n.canvas_scaler.map_or(1.0, |c| c.factor(f.old_size, (n.width, n.height)));
+    let k = n.canvas_scaler.map_or(1.0, |c| c.factor((f.old_size.0, f.old_size.1, f.old_density), (n.width, n.height, snap.density())));
     for &(id, x, y, w, h) in &f.layers {
         let Some(c) = doc.node(id) else { continue };
         let hpin = match c.constraints.horizontal {
@@ -501,6 +518,39 @@ fn canvas_scaler_set(s: &mut Session, p: &Value) -> Result<Value> {
             continue;
         }
         let mut c = n.canvas_scaler.unwrap_or_default();
+        if let Some(preset) = params::string(p, "preset") {
+            if !preset.eq_ignore_ascii_case("shortSide") {
+                return Err(bad(CMD, "`preset` must be shortSide"));
+            }
+            let side = match get(p, "shortSide") {
+                None => n.width.min(n.height),
+                Some(v) => {
+                    params::f64_of(v).filter(|v| (1.0..=100_000.0).contains(v)).ok_or_else(|| bad(CMD, "`shortSide` must be from 1 to 100000"))?
+                }
+            };
+            if !(1.0..=100_000.0).contains(&side) {
+                return Err(bad(CMD, format!("{i} is too small for a short side")));
+            }
+            c = figcraft_doc::CanvasScaler::short_side(r4(side));
+        }
+        if let Some(m) = params::string(p, "scaleMode") {
+            c.scale_mode = match m.to_ascii_lowercase().as_str() {
+                "constantpixelsize" | "pixel" => figcraft_doc::UiScaleMode::ConstantPixelSize,
+                "scalewithscreensize" | "screen" => figcraft_doc::UiScaleMode::ScaleWithScreenSize,
+                "constantphysicalsize" | "physical" => figcraft_doc::UiScaleMode::ConstantPhysicalSize,
+                _ => return Err(bad(CMD, "`scaleMode` must be constantPixelSize, scaleWithScreenSize or constantPhysicalSize")),
+            };
+        }
+        if let Some(v) = get(p, "scaleFactor") {
+            c.scale_factor =
+                params::f64_of(v).filter(|v| (0.01..=100.0).contains(v)).ok_or_else(|| bad(CMD, "`scaleFactor` must be from 0.01 to 100"))?;
+        }
+        for (key, slot) in [("referenceDpi", &mut c.reference_dpi), ("fallbackDpi", &mut c.fallback_dpi)] {
+            if let Some(v) = get(p, key) {
+                *slot =
+                    params::f64_of(v).filter(|v| (1.0..=2000.0).contains(v)).ok_or_else(|| bad(CMD, format!("`{key}` must be from 1 to 2000")))?;
+            }
+        }
         if let Some(r) = get(p, "referenceResolution") {
             let wh = r.as_array().filter(|a| a.len() == 2).and_then(|a| Some((params::f64_of(a.first()?)?, params::f64_of(a.get(1)?)?)));
             let Some((w, h)) = wh.filter(|(w, h)| (1.0..=100_000.0).contains(w) && (1.0..=100_000.0).contains(h)) else {

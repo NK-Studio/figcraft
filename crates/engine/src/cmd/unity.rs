@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.exportUitk",
             "Export to Unity UI Toolkit",
-            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity script into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write DesignPanelScaler.cs, default true; the safe area needs the com.nkstudio.figcraft Unity package)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
+            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `<frame>.panelsettings.json` and `images/` into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2)} → {version, documents: [{frame, name, stem, width, height, safeArea, panelSettings (the frame's UI scaling for Unity's PanelSettings, or its short side), uxml?, uss?}], files?, bakes, images, counts, issues}",
             false,
             file_export_uitk
         ),
@@ -241,7 +241,6 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         None => 2.0,
         Some(v) => params::f64_of(v).filter(|k| (0.5..=8.0).contains(k)).ok_or_else(|| bad(CMD, "`scale` must be from 0.5 to 8"))?,
     };
-    let scripts = params::boolean(p, "scripts").unwrap_or(true);
     let dir = match get(p, "dir") {
         None => None,
         Some(Value::String(d)) if !d.trim().is_empty() => Some(std::path::PathBuf::from(d)),
@@ -259,7 +258,7 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         .documents
         .iter()
         .map(|d| {
-            let mut v = json!({"frame": d.frame, "name": d.name, "stem": d.stem, "width": d.width, "height": d.height, "safeArea": d.safe_area});
+            let mut v = json!({"frame": d.frame, "name": d.name, "stem": d.stem, "width": d.width, "height": d.height, "safeArea": d.safe_area, "panelSettings": d.panel_settings});
             if dir.is_none() {
                 v["uxml"] = json!(d.uxml);
                 v["uss"] = json!(d.uss);
@@ -293,6 +292,8 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
     for d in &ex.documents {
         put(&format!("{}.uxml", d.stem), d.uxml.as_bytes())?;
         put(&format!("{}.uss", d.stem), d.uss.as_bytes())?;
+        let settings = serde_json::to_string_pretty(&d.panel_settings).map_err(|e| bad(CMD, e.to_string()))?;
+        put(&format!("{}.panelsettings.json", d.stem), format!("{settings}\n").as_bytes())?;
     }
     for (file, png) in &pngs {
         put(file, png)?;
@@ -301,10 +302,6 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         if let Some(data) = doc.images.get(&img.hash) {
             put(&img.file, &data.bytes)?;
         }
-    }
-    if scripts {
-        let (name, code) = figcraft_uitk::scripts::PANEL_SCALE;
-        put(name, code.as_bytes())?;
     }
     s.message = Some(format!("Exported {} frames for Unity {}", ex.documents.len(), opts.version));
     Ok(

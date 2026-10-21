@@ -116,29 +116,47 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
     export_button(app, ui, Some(sel));
 }
 
-/// A top-level frame's Unity CanvasScaler (Scale With Screen Size): none, or how it matches the
-/// screen, its reference resolution and the match.
+/// A top-level frame's Unity UI scaling (uGUI CanvasScaler, UI Toolkit PanelSettings): none, a
+/// scale mode or the short-side preset, then that mode's settings.
 fn canvas_scaler_rows(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId) {
-    use figcraft_doc::ScreenMatchMode;
+    use figcraft_doc::{ScreenMatchMode, UiScaleMode};
     let t = Tokens::get(ui.ctx());
     let c = doc.node(id).and_then(|n| n.canvas_scaler);
-    let label = match c.map(|c| c.screen_match_mode) {
-        None => tr("None"),
-        Some(ScreenMatchMode::MatchWidthOrHeight) => tr("Match width or height"),
-        Some(ScreenMatchMode::Expand) => "Expand",
-        Some(ScreenMatchMode::Shrink) => "Shrink",
+    let set = |app: &mut FigApp, props: serde_json::Value| {
+        let mut p = json!({"ids": [id]});
+        if let (Some(o), Some(extra)) = (p.as_object_mut(), props.as_object()) {
+            o.extend(extra.clone());
+        }
+        app.run("unity.canvasScaler.set", p);
+    };
+    let label = match c {
+        None => tr("None (exports short side)").to_string(),
+        Some(c) => match (c.short_side_of(), c.scale_mode) {
+            (Some(side), _) => format!("{} {}", tr("Short side"), (side * 1000.0).round() / 1000.0),
+            (None, UiScaleMode::ConstantPixelSize) => tr("Constant pixel size").to_string(),
+            (None, UiScaleMode::ScaleWithScreenSize) => tr("Scale with screen size").to_string(),
+            (None, UiScaleMode::ConstantPhysicalSize) => tr("Constant physical size").to_string(),
+        },
     };
     row(ui, 32.0, |ui| {
-        widgets::label(ui, tr("Canvas scaler"), t.text_secondary);
-        let resp = widgets::dropdown(ui, label, 150.0, None);
+        widgets::label(ui, tr("UI scaling"), t.text_secondary);
+        let resp = widgets::dropdown(ui, &label, 150.0, None);
         menu_popup(&resp).show(|ui| {
             if menu_item(ui, tr("None"), "") {
-                app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": null}));
+                set(app, json!({"clear": true}));
                 ui.close();
             }
-            for (name, mode) in [(tr("Match width or height"), "matchWidthOrHeight"), ("Expand", "expand"), ("Shrink", "shrink")] {
+            if menu_item(ui, tr("Short side (rotation-safe)"), "") {
+                set(app, json!({"preset": "shortSide"}));
+                ui.close();
+            }
+            for (name, mode) in [
+                (tr("Constant pixel size"), "constantPixelSize"),
+                (tr("Scale with screen size"), "scaleWithScreenSize"),
+                (tr("Constant physical size"), "constantPhysicalSize"),
+            ] {
                 if menu_item(ui, name, "") {
-                    app.run("unity.canvasScaler.set", json!({"ids": [id], "screenMatchMode": mode}));
+                    set(app, json!({"scaleMode": mode}));
                     ui.close();
                 }
             }
@@ -146,28 +164,68 @@ fn canvas_scaler_rows(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId)
     });
     let Some(c) = c else { return };
     let num = |v: f64| format!("{}", (v * 1000.0).round() / 1000.0);
-    row(ui, 32.0, |ui| {
-        widgets::label(ui, tr("Reference"), t.text_secondary);
-        if let Some(v) = widgets::text_field(ui, Id::new(("cs_w", id)), &num(c.reference_width), 64.0, "W").and_then(|v| v.trim().parse::<f64>().ok())
-        {
-            app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": [v, c.reference_height]}));
+    let field = |ui: &mut Ui, key: &str, v: f64, w: f32, hint: &str| {
+        widgets::text_field(ui, Id::new(("cs", key, id)), &num(v), w, hint).and_then(|v| v.trim().parse::<f64>().ok())
+    };
+    match c.scale_mode {
+        UiScaleMode::ScaleWithScreenSize => {
+            let label = match c.screen_match_mode {
+                ScreenMatchMode::MatchWidthOrHeight => tr("Match width or height"),
+                ScreenMatchMode::Expand => "Expand",
+                ScreenMatchMode::Shrink => "Shrink",
+            };
+            row(ui, 32.0, |ui| {
+                widgets::label(ui, tr("Screen match"), t.text_secondary);
+                let resp = widgets::dropdown(ui, label, 150.0, None);
+                menu_popup(&resp).show(|ui| {
+                    for (name, mode) in [(tr("Match width or height"), "matchWidthOrHeight"), ("Expand", "expand"), ("Shrink", "shrink")] {
+                        if menu_item(ui, name, "") {
+                            set(app, json!({"screenMatchMode": mode}));
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            row(ui, 32.0, |ui| {
+                widgets::label(ui, tr("Reference"), t.text_secondary);
+                if let Some(v) = field(ui, "w", c.reference_width, 64.0, "W") {
+                    set(app, json!({"referenceResolution": [v, c.reference_height]}));
+                }
+                if let Some(v) = field(ui, "h", c.reference_height, 64.0, "H") {
+                    set(app, json!({"referenceResolution": [c.reference_width, v]}));
+                }
+            });
+            if c.screen_match_mode == ScreenMatchMode::MatchWidthOrHeight {
+                row(ui, 32.0, |ui| {
+                    widgets::label(ui, tr("Match (0 width – 1 height)"), t.text_secondary);
+                    if let Some(v) = field(ui, "m", c.match_width_or_height, 56.0, "") {
+                        set(app, json!({"match": v.clamp(0.0, 1.0)}));
+                    }
+                });
+            }
         }
-        if let Some(v) =
-            widgets::text_field(ui, Id::new(("cs_h", id)), &num(c.reference_height), 64.0, "H").and_then(|v| v.trim().parse::<f64>().ok())
-        {
-            app.run("unity.canvasScaler.set", json!({"ids": [id], "referenceResolution": [c.reference_width, v]}));
+        UiScaleMode::ConstantPhysicalSize => {
+            row(ui, 32.0, |ui| {
+                widgets::label(ui, tr("Reference DPI"), t.text_secondary);
+                if let Some(v) = field(ui, "rdpi", c.reference_dpi, 56.0, "") {
+                    set(app, json!({"referenceDpi": v.clamp(1.0, 2000.0)}));
+                }
+            });
+            row(ui, 32.0, |ui| {
+                widgets::label(ui, tr("Fallback DPI"), t.text_secondary);
+                if let Some(v) = field(ui, "fdpi", c.fallback_dpi, 56.0, "") {
+                    set(app, json!({"fallbackDpi": v.clamp(1.0, 2000.0)}));
+                }
+            });
+        }
+        UiScaleMode::ConstantPixelSize => {}
+    }
+    row(ui, 32.0, |ui| {
+        widgets::label(ui, tr("Scale factor"), t.text_secondary);
+        if let Some(v) = field(ui, "k", c.scale_factor, 56.0, "") {
+            set(app, json!({"scaleFactor": v.clamp(0.01, 100.0)}));
         }
     });
-    if c.screen_match_mode == ScreenMatchMode::MatchWidthOrHeight {
-        row(ui, 32.0, |ui| {
-            widgets::label(ui, tr("Match (0 width – 1 height)"), t.text_secondary);
-            if let Some(v) =
-                widgets::text_field(ui, Id::new(("cs_m", id)), &num(c.match_width_or_height), 56.0, "").and_then(|v| v.trim().parse::<f64>().ok())
-            {
-                app.run("unity.canvasScaler.set", json!({"ids": [id], "match": v.clamp(0.0, 1.0)}));
-            }
-        });
-    }
 }
 
 /// The 9-point pivot picker, the pivot as numbers, and Reset when the layer sets its own.

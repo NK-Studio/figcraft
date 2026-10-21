@@ -401,8 +401,7 @@ impl NodeKind {
     }
 }
 
-/// How Unity's CanvasScaler (Scale With Screen Size) matches the screen to its reference
-/// resolution.
+/// How Unity's Scale With Screen Size matches the screen to its reference resolution.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ScreenMatchMode {
@@ -415,47 +414,119 @@ pub enum ScreenMatchMode {
     Shrink,
 }
 
-/// Unity's CanvasScaler in Scale With Screen Size mode, on a frame.
+/// Unity's UI scale mode (uGUI `CanvasScaler.uiScaleMode`, UI Toolkit `PanelSettings.scaleMode`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum UiScaleMode {
+    /// A unit is `scale_factor` screen pixels.
+    ConstantPixelSize,
+    /// The canvas follows the screen's size against a reference resolution.
+    #[default]
+    ScaleWithScreenSize,
+    /// A unit keeps its physical size: `scale_factor · dpi / reference_dpi` screen pixels.
+    ConstantPhysicalSize,
+}
+
+/// What a screen-dependent scale mode needs to know about the screen; 0 means unknown.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct ScreenDensity {
+    pub pixels_per_point: f64,
+    pub dpi: f64,
+}
+
+/// Unity's UI scaling on a frame: the uGUI CanvasScaler, or the UI Toolkit PanelSettings scaling
+/// (`docs/unity-uitk.md` › UI scaling).
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct CanvasScaler {
-    /// The reference resolution, in canvas units.
+    pub scale_mode: UiScaleMode,
+    /// Multiplies every mode (`CanvasScaler.scaleFactor`, `PanelSettings.scale`).
+    pub scale_factor: f64,
+    /// The reference resolution, in canvas units (Scale With Screen Size).
     pub reference_width: f64,
     pub reference_height: f64,
     pub screen_match_mode: ScreenMatchMode,
     /// 0: match the width, 1: the height (MatchWidthOrHeight).
     pub match_width_or_height: f64,
+    /// The dpi at which a unit is one pixel (Constant Physical Size).
+    pub reference_dpi: f64,
+    /// The dpi assumed when the screen doesn't say (Constant Physical Size).
+    pub fallback_dpi: f64,
 }
 
 impl Default for CanvasScaler {
     fn default() -> Self {
-        Self { reference_width: 1080.0, reference_height: 1920.0, screen_match_mode: ScreenMatchMode::MatchWidthOrHeight, match_width_or_height: 0.0 }
+        Self {
+            scale_mode: UiScaleMode::ScaleWithScreenSize,
+            scale_factor: 1.0,
+            reference_width: 1080.0,
+            reference_height: 1920.0,
+            screen_match_mode: ScreenMatchMode::MatchWidthOrHeight,
+            match_width_or_height: 0.0,
+            reference_dpi: 96.0,
+            fallback_dpi: 96.0,
+        }
     }
 }
 
 impl CanvasScaler {
-    /// Points per canvas unit on a `w × h` pt screen (Unity's scale factor over the screen's
-    /// pixels per point, which cancels out); `None` when it can't be worked out.
-    pub fn points_per_unit(&self, w: f64, h: f64) -> Option<f64> {
-        let (rw, rh) = (self.reference_width, self.reference_height);
-        if ![w, h, rw, rh].iter().all(|v| v.is_finite() && *v > 0.0) {
-            return None;
-        }
-        let (sx, sy) = (w / rw, h / rh);
-        let u = match self.screen_match_mode {
-            ScreenMatchMode::MatchWidthOrHeight => {
-                let m = if self.match_width_or_height.is_finite() { self.match_width_or_height.clamp(0.0, 1.0) } else { 0.0 };
-                (sx.log2() * (1.0 - m) + sy.log2() * m).exp2()
-            }
-            ScreenMatchMode::Expand => sx.min(sy),
-            ScreenMatchMode::Shrink => sx.max(sy),
-        };
-        (u.is_finite() && u > 0.0).then_some(u)
+    /// The rotation-safe "short side" setup: Scale With Screen Size against a `side × side`
+    /// reference with Expand, so the canvas's short side is `side` units on every screen and in
+    /// both orientations.
+    pub fn short_side(side: f64) -> Self {
+        Self { reference_width: side, reference_height: side, screen_match_mode: ScreenMatchMode::Expand, ..Self::default() }
     }
 
-    /// How much a frame's contents scale when it goes from `old` to `new` (pt): 1 when unknown.
-    pub fn factor(&self, old: (f64, f64), new: (f64, f64)) -> f64 {
-        match (self.points_per_unit(old.0, old.1), self.points_per_unit(new.0, new.1)) {
+    /// The short side of a short-side setup (a square reference with Expand), if it is one.
+    pub fn short_side_of(&self) -> Option<f64> {
+        let square = (self.reference_width - self.reference_height).abs() < 1e-9;
+        (self.scale_mode == UiScaleMode::ScaleWithScreenSize && self.screen_match_mode == ScreenMatchMode::Expand && square)
+            .then_some(self.reference_width)
+    }
+
+    /// Points per canvas unit on a `w × h` pt screen of density `d`; `None` when it can't be
+    /// worked out (Constant Pixel Size and Constant Physical Size need the screen's pixels per
+    /// point).
+    pub fn points_per_unit(&self, w: f64, h: f64, d: ScreenDensity) -> Option<f64> {
+        let ok = |v: f64| v.is_finite() && v > 0.0;
+        let k = if ok(self.scale_factor) { self.scale_factor } else { 1.0 };
+        let u = match self.scale_mode {
+            UiScaleMode::ScaleWithScreenSize => {
+                let (rw, rh) = (self.reference_width, self.reference_height);
+                if ![w, h, rw, rh].into_iter().all(ok) {
+                    return None;
+                }
+                // Unity's scale factor over the screen's pixels per point, which cancels out.
+                let (sx, sy) = (w / rw, h / rh);
+                match self.screen_match_mode {
+                    ScreenMatchMode::MatchWidthOrHeight => {
+                        let m = if self.match_width_or_height.is_finite() { self.match_width_or_height.clamp(0.0, 1.0) } else { 0.0 };
+                        (sx.log2() * (1.0 - m) + sy.log2() * m).exp2()
+                    }
+                    ScreenMatchMode::Expand => sx.min(sy),
+                    ScreenMatchMode::Shrink => sx.max(sy),
+                }
+            }
+            UiScaleMode::ConstantPixelSize if ok(d.pixels_per_point) => 1.0 / d.pixels_per_point,
+            UiScaleMode::ConstantPhysicalSize if ok(d.pixels_per_point) && ok(self.reference_dpi) => {
+                let dpi = if ok(d.dpi) {
+                    d.dpi
+                } else if ok(self.fallback_dpi) {
+                    self.fallback_dpi
+                } else {
+                    return None;
+                };
+                dpi / self.reference_dpi / d.pixels_per_point
+            }
+            _ => return None,
+        } * k;
+        ok(u).then_some(u)
+    }
+
+    /// How much a frame's contents scale when it goes from `old` to `new` (size in pt and the
+    /// screen's density): 1 when unknown.
+    pub fn factor(&self, old: (f64, f64, ScreenDensity), new: (f64, f64, ScreenDensity)) -> f64 {
+        match (self.points_per_unit(old.0, old.1, old.2), self.points_per_unit(new.0, new.1, new.2)) {
             (Some(a), Some(b)) => b / a,
             _ => 1.0,
         }
@@ -520,9 +591,18 @@ pub struct DeviceFrame {
     /// Display cutouts, top-left origin.
     pub cutouts: Vec<BoxRect>,
     pub corner_radius: f64,
+    /// The screen's pixels per point (0: unknown, files from before it was kept).
+    pub pixels_per_point: f64,
+    /// The screen's dots per inch (0: unknown).
+    pub dpi: f64,
 }
 
 impl DeviceFrame {
+    /// What Unity's pixel-based scale modes need to know about the screen.
+    pub fn density(&self) -> ScreenDensity {
+        ScreenDensity { pixels_per_point: self.pixels_per_point, dpi: self.dpi }
+    }
+
     /// The safe area insets for a `w × h` frame: the stored ones, each kept finite, positive and
     /// within the frame (a file can say anything).
     pub fn insets_for(&self, w: f64, h: f64) -> SideInsets {

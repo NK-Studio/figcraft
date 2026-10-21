@@ -3,7 +3,9 @@
 //! USS rule. What the target version can't
 //! draw is baked: the export lists those layers ([`Bake`]) and the caller renders them to PNG.
 //!
-//! Units: 1 USS px = 1 FigCraft point (the panel-scale rule). Device frames get a
+//! Units: panel units, from the frame's UI scaling (`panel_scaling`, written next to the UXML as
+//! `<stem>.panelsettings.json`): 1 px = 1 point with the default short-side scaling, otherwise the
+//! design screen's units per point. Device frames get a
 //! `FigCraft.PanelSafeArea` element (the FigCraft Unity package, `com.nkstudio.figcraft`) holding the
 //! layers inside their safe area; it follows `Screen.safeArea` in the Editor and at run time, and
 //! shows the frame's insets (`design-inset-*`) in the UI Builder.
@@ -56,6 +58,8 @@ pub struct UitkDocument {
     pub height: f64,
     /// The frame is a device frame: its document has a panel safe area container.
     pub safe_area: bool,
+    /// The frame's UI scaling, for Unity's PanelSettings (`<stem>.panelsettings.json`).
+    pub panel_settings: crate::PanelSettingsFile,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -95,17 +99,42 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
         }
         let stem = unique_stem(&n.name, &mut stems);
         let block = block_name(&stem);
-        let mut w =
-            Writer { doc, opts, fixed_text_boxes, block, uxml: String::new(), uss: String::new(), count: 0, bakes: Vec::new(), images: &mut images };
+        let scaling = crate::panel_scaling(n);
+        let unit = scaling.units_per_point.unwrap_or(1.0);
+        let mut w = Writer {
+            doc,
+            opts,
+            fixed_text_boxes,
+            block,
+            uxml: String::new(),
+            uss: String::new(),
+            count: 0,
+            bakes: Vec::new(),
+            images: &mut images,
+            unit,
+        };
         let safe_area = n.device.is_some();
         w.root(n);
         let uxml = format!(
-            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. 1 px = 1 pt; see DesignPanelScaler. Needs the com.nkstudio.figcraft package. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
-            opts.version, w.uxml
+            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. Panel units ({} per pt): show it with {stem}.panelsettings.json's PanelSettings. Needs the com.nkstudio.figcraft package. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
+            opts.version,
+            num(unit),
+            w.uxml
         );
         let uss = format!("/* Exported by FigCraft for Unity {} from \"{}\". */\n{}", opts.version, n.name.replace("*/", "* /"), w.uss);
         out.bakes.append(&mut w.bakes);
-        out.documents.push(UitkDocument { frame: id, name: n.name.clone(), stem, uxml, uss, width: n.width, height: n.height, safe_area });
+        let panel_settings = scaling.file();
+        out.documents.push(UitkDocument {
+            frame: id,
+            name: n.name.clone(),
+            stem,
+            uxml,
+            uss,
+            width: n.width,
+            height: n.height,
+            safe_area,
+            panel_settings,
+        });
     }
     out.images = images.into_iter().map(|(hash, file)| ImageFile { hash, file }).collect();
     let roots: Vec<NodeId> = out.documents.iter().map(|d| d.frame).collect();
@@ -184,6 +213,8 @@ struct Writer<'a> {
     count: usize,
     bakes: Vec<Bake>,
     images: &'a mut BTreeMap<String, String>,
+    /// Panel units per point: every length is multiplied by it.
+    unit: f64,
 }
 
 /// A USS length in px.
@@ -317,7 +348,7 @@ impl Writer<'_> {
         let tag = if text { "ui:Label" } else { "ui:VisualElement" };
         let mut attrs = format!("name=\"{}\" class=\"{class}\"", xml(&n.name));
         if let NodeKind::Text(t) = &n.kind {
-            let _ = write!(attrs, " text=\"{}\"", xml(&label_text(t)));
+            let _ = write!(attrs, " text=\"{}\"", xml(&label_text(t, self.unit)));
         }
         if n.locked {
             attrs.push_str(" picking-mode=\"Ignore\"");
@@ -438,10 +469,10 @@ impl Writer<'_> {
         let indent = "    ".repeat(depth);
         let open = format!(
             "{indent}<FigCraft.PanelSafeArea name=\"PanelSafeArea\" class=\"{class}\" picking-mode=\"Ignore\" design-inset-top=\"{}\" design-inset-right=\"{}\" design-inset-bottom=\"{}\" design-inset-left=\"{}\"",
-            num(top),
-            num(right),
-            num(bottom),
-            num(left)
+            num(top * self.unit),
+            num(right * self.unit),
+            num(bottom * self.unit),
+            num(left * self.unit)
         );
         if within.is_empty() {
             let _ = writeln!(self.uxml, "{open} />");
@@ -836,10 +867,62 @@ impl Writer<'_> {
         }
         let _ = writeln!(self.uss, "\n{selector} {{");
         for (k, v) in st {
-            let _ = writeln!(self.uss, "    {k}: {v};");
+            if (self.unit - 1.0).abs() > 1e-12 {
+                let _ = writeln!(self.uss, "    {k}: {};", scale_lengths(v, self.unit));
+            } else {
+                let _ = writeln!(self.uss, "    {k}: {v};");
+            }
         }
         self.uss.push_str("}\n");
     }
+}
+
+#[cfg(test)]
+pub(crate) fn scale_lengths_for_tests(v: &str, k: f64) -> String {
+    scale_lengths(v, k)
+}
+
+/// `v` with every `<number>px` outside quotes multiplied by `k` (points to panel units).
+fn scale_lengths(v: &str, k: f64) -> String {
+    let mut out = String::with_capacity(v.len());
+    let mut quoted = None;
+    let mut rest = v;
+    while let Some(c) = rest.chars().next() {
+        if let Some(q) = quoted {
+            out.push(c);
+            rest = &rest[c.len_utf8()..];
+            if c == q {
+                quoted = None;
+            }
+            continue;
+        }
+        if c == '"' || c == '\'' {
+            quoted = Some(c);
+            out.push(c);
+            rest = &rest[1..];
+            continue;
+        }
+        // A number starts here unless it continues a word ("h1", a hex colour, a url).
+        let starts =
+            (c.is_ascii_digit() || c == '.' || c == '-') && !out.chars().last().is_some_and(|p| p.is_ascii_alphanumeric() || p == '_' || p == '#');
+        if starts {
+            let len = rest.char_indices().skip(1).find(|(_, d)| !(d.is_ascii_digit() || *d == '.')).map_or(rest.len(), |(i, _)| i);
+            let (number, after) = rest.split_at(len);
+            if let (Some(tail), Ok(n)) = (after.strip_prefix("px"), number.parse::<f64>())
+                && !tail.chars().next().is_some_and(|d| d.is_ascii_alphanumeric())
+            {
+                out.push_str(&px(n * k));
+                rest = tail;
+                continue;
+            }
+            out.push_str(number);
+            rest = after;
+            continue;
+        }
+        out.push(c);
+        rest = &rest[c.len_utf8()..];
+    }
+    out
 }
 
 /// An image's file extension from its first bytes.
@@ -858,14 +941,14 @@ fn image_ext(b: &[u8]) -> &'static str {
 }
 
 /// The text a Label shows: the characters, with the line height as a rich text tag (USS has none).
-fn label_text(t: &figcraft_doc::TextData) -> String {
+fn label_text(t: &figcraft_doc::TextData, unit: f64) -> String {
     let lh = match t.style.line_height {
         LineHeight::Auto => None,
         LineHeight::Pixels(v) => Some(v),
         LineHeight::Percent(p) => Some(p / 100.0 * t.style.font_size),
     };
     match lh.filter(|v| v.is_finite() && *v > 0.0) {
-        Some(v) => format!("<line-height={}px>{}", num(v), t.characters),
+        Some(v) => format!("<line-height={}px>{}", num(v * unit), t.characters),
         None => t.characters.clone(),
     }
 }

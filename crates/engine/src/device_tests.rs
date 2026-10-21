@@ -328,3 +328,66 @@ fn a_canvas_scaler_and_the_safe_area_work_together_on_a_device_change() {
     let b = n(&s, boxed);
     assert!((b.width - 40.0 * k).abs() < 1e-3 && (b.transform.as_coeffs()[5] - 10.0 * k).abs() < 1e-3);
 }
+
+#[test]
+fn constant_pixel_size_scales_with_the_density_on_a_device_change() {
+    let mut s = Session::new();
+    s.execute("device.import", &json!({"text": unity_device("Dense Phone").to_string()})).unwrap();
+    let mut low = unity_device("Low Phone");
+    low["screens"][0]["width"] = json!(750);
+    low["screens"][0]["height"] = json!(1334);
+    low["screens"][0]["dpi"] = json!(326.0);
+    low["screens"][0]["orientations"][0]["safeArea"] = json!({"x": 0.0, "y": 0.0, "width": 750.0, "height": 1334.0});
+    low["screens"][0]["orientations"][0]["cutouts"] = json!([]);
+    low["screens"][0]["orientations"][1]["safeArea"] = json!({"x": 0.0, "y": 0.0, "width": 1334.0, "height": 750.0});
+    s.execute("device.import", &json!({"text": low.to_string()})).unwrap();
+    let scale = |s: &mut Session, id: &str| s.execute("device.get", &json!({"id": id})).unwrap()["scale"].as_f64().unwrap();
+    let (dense, light) = (scale(&mut s, "unity/dense-phone"), scale(&mut s, "unity/low-phone"));
+    assert!(dense > light, "{dense} {light}");
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/dense-phone"})).unwrap();
+    let r = s.execute("unity.canvasScaler.set", &json!({"ids": [f], "scaleMode": "constantPixelSize"})).unwrap();
+    assert_eq!(r["canvasScaler"]["scaleMode"], "constantPixelSize");
+    let boxed = node_id(&s.execute("shape.rectangle", &json!({"x": 10, "y": 200, "width": 30, "height": 30, "parent": f})).unwrap());
+    let n = |s: &Session, id| s.doc().unwrap().node(id).unwrap().clone();
+    // Resizing without changing the device: a pixel stays a pixel, nothing scales.
+    s.execute("node.set", &json!({"id": f, "props": {"width": 420}})).unwrap();
+    assert_eq!(n(&s, boxed).width, 30.0);
+    s.execute("edit.undo", &json!({})).unwrap();
+    // A less dense screen: every pixel is more points, so the box grows by dense/light.
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/low-phone"})).unwrap();
+    let k = dense / light;
+    let b = n(&s, boxed);
+    assert!((b.width - 30.0 * k).abs() < 1e-3 && (b.transform.as_coeffs()[4] - 10.0 * k).abs() < 1e-3, "{} {:?}", b.width, b.transform);
+    // Physical size: the dpi decides as well.
+    s.execute("edit.undo", &json!({})).unwrap();
+    s.execute("unity.canvasScaler.set", &json!({"ids": [f], "scaleMode": "constantPhysicalSize", "referenceDpi": 160})).unwrap();
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/low-phone"})).unwrap();
+    let k = (326.0 / light) / (300.0 / dense);
+    assert!((n(&s, boxed).width - 30.0 * k).abs() < 1e-3, "{}", n(&s, boxed).width);
+}
+
+#[test]
+fn the_short_side_preset_and_scaler_params() {
+    let mut s = Session::new();
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 393, "height": 852})).unwrap());
+    let r = s.execute("unity.canvasScaler.set", &json!({"ids": [f], "preset": "shortSide"})).unwrap();
+    let c = &r["canvasScaler"];
+    assert_eq!((c["scaleMode"].as_str(), c["screenMatchMode"].as_str()), (Some("scaleWithScreenSize"), Some("expand")));
+    assert_eq!((c["referenceWidth"].as_f64(), c["referenceHeight"].as_f64()), (Some(393.0), Some(393.0)));
+    let r = s.execute("unity.canvasScaler.set", &json!({"ids": [f], "preset": "shortSide", "shortSide": 360, "scaleFactor": 1.5})).unwrap();
+    assert_eq!((r["canvasScaler"]["referenceWidth"].as_f64(), r["canvasScaler"]["scaleFactor"].as_f64()), (Some(360.0), Some(1.5)));
+    // A short-side frame turned to landscape keeps its contents' size.
+    let boxed = node_id(&s.execute("shape.rectangle", &json!({"x": 10, "y": 10, "width": 30, "height": 30, "parent": f})).unwrap());
+    s.execute("node.set", &json!({"id": f, "props": {"width": 852, "height": 393}})).unwrap();
+    assert!((s.doc().unwrap().node(boxed).unwrap().width - 30.0).abs() < 1e-9);
+    for bad in [
+        json!({"ids": [f], "preset": "tall"}),
+        json!({"ids": [f], "preset": "shortSide", "shortSide": 0}),
+        json!({"ids": [f], "scaleMode": "zoom"}),
+        json!({"ids": [f], "scaleFactor": 0}),
+        json!({"ids": [f], "referenceDpi": 5000}),
+    ] {
+        assert!(s.execute("unity.canvasScaler.set", &bad).is_err(), "{bad}");
+    }
+}

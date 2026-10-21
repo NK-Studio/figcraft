@@ -508,21 +508,56 @@ fn device_frames_hold_layers_inside_the_safe_area_off_the_edges() {
 
 #[test]
 fn canvas_scaler_points_per_unit() {
-    use crate::{CanvasScaler, ScreenMatchMode};
-    let mut c =
-        CanvasScaler { reference_width: 1080.0, reference_height: 1920.0, screen_match_mode: ScreenMatchMode::Expand, match_width_or_height: 0.0 };
+    use crate::{CanvasScaler, ScreenDensity, ScreenMatchMode};
+    let none = ScreenDensity::default();
+    let mut c = CanvasScaler { screen_match_mode: ScreenMatchMode::Expand, ..CanvasScaler::default() };
     // iPhone 12 mini: the width decides (375/1080 < 812/1920).
-    assert!((c.points_per_unit(375.0, 812.0).unwrap() - 375.0 / 1080.0).abs() < 1e-12);
-    assert!((c.factor((375.0, 812.0), (440.0, 956.0)) - 440.0 / 375.0).abs() < 1e-12);
+    assert!((c.points_per_unit(375.0, 812.0, none).unwrap() - 375.0 / 1080.0).abs() < 1e-12);
+    assert!((c.factor((375.0, 812.0, none), (440.0, 956.0, none)) - 440.0 / 375.0).abs() < 1e-12);
     c.screen_match_mode = ScreenMatchMode::Shrink;
-    assert!((c.points_per_unit(375.0, 812.0).unwrap() - 812.0 / 1920.0).abs() < 1e-12);
+    assert!((c.points_per_unit(375.0, 812.0, none).unwrap() - 812.0 / 1920.0).abs() < 1e-12);
     c.screen_match_mode = ScreenMatchMode::MatchWidthOrHeight;
     c.match_width_or_height = 0.5;
     let geo = ((375.0f64 / 1080.0) * (812.0 / 1920.0)).sqrt();
-    assert!((c.points_per_unit(375.0, 812.0).unwrap() - geo).abs() < 1e-12);
+    assert!((c.points_per_unit(375.0, 812.0, none).unwrap() - geo).abs() < 1e-12);
+    // The scale factor multiplies every mode.
+    c.scale_factor = 2.0;
+    assert!((c.points_per_unit(375.0, 812.0, none).unwrap() - 2.0 * geo).abs() < 1e-12);
     c.reference_width = 0.0;
-    assert_eq!(c.points_per_unit(375.0, 812.0), None);
-    assert_eq!(c.factor((375.0, 812.0), (440.0, 956.0)), 1.0);
+    assert_eq!(c.points_per_unit(375.0, 812.0, none), None);
+    assert_eq!(c.factor((375.0, 812.0, none), (440.0, 956.0, none)), 1.0);
+}
+
+#[test]
+fn canvas_scaler_pixel_and_physical_modes_follow_the_density() {
+    use crate::{CanvasScaler, ScreenDensity, UiScaleMode};
+    let x2 = ScreenDensity { pixels_per_point: 2.0, dpi: 326.0 };
+    let x3 = ScreenDensity { pixels_per_point: 3.0, dpi: 458.0 };
+    let pixel = CanvasScaler { scale_mode: UiScaleMode::ConstantPixelSize, ..CanvasScaler::default() };
+    // A unit is a pixel: half a point at 2x, a third at 3x, whatever the size.
+    assert_eq!(pixel.points_per_unit(375.0, 812.0, x2), Some(0.5));
+    assert!((pixel.factor((375.0, 812.0, x2), (430.0, 932.0, x3)) - 2.0 / 3.0).abs() < 1e-12);
+    assert_eq!(pixel.factor((375.0, 812.0, x2), (430.0, 932.0, x2)), 1.0);
+    // Unknown density: nothing to scale by.
+    assert_eq!(pixel.points_per_unit(375.0, 812.0, ScreenDensity::default()), None);
+    let physical = CanvasScaler { scale_mode: UiScaleMode::ConstantPhysicalSize, reference_dpi: 160.0, ..CanvasScaler::default() };
+    assert!((physical.points_per_unit(375.0, 812.0, x2).unwrap() - 326.0 / 160.0 / 2.0).abs() < 1e-12);
+    // No dpi: the fallback dpi.
+    let no_dpi = ScreenDensity { pixels_per_point: 2.0, dpi: 0.0 };
+    assert!((physical.points_per_unit(375.0, 812.0, no_dpi).unwrap() - 96.0 / 160.0 / 2.0).abs() < 1e-12);
+}
+
+#[test]
+fn canvas_scaler_short_side_keeps_the_short_side_in_both_orientations() {
+    use crate::{CanvasScaler, ScreenDensity};
+    let c = CanvasScaler::short_side(375.0);
+    assert_eq!(c.short_side_of(), Some(375.0));
+    let d = ScreenDensity::default();
+    for (w, h) in [(375.0, 812.0), (812.0, 375.0), (768.0, 1024.0), (1024.0, 768.0)] {
+        let u = c.points_per_unit(w, h, d).unwrap();
+        assert!((f64::min(w, h) / u - 375.0).abs() < 1e-9, "{w}x{h}");
+    }
+    assert_eq!(CanvasScaler::default().short_side_of(), None);
 }
 
 #[test]

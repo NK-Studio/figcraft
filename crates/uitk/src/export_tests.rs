@@ -276,3 +276,51 @@ fn block_names_are_kebab_case_and_start_with_a_letter() {
     }
     assert_eq!(out, vec!["bunny-magic-card-show", "screen-12-cards", "frame", "i-phone-12-mini"]);
 }
+
+#[test]
+fn lengths_follow_the_frames_ui_scaling() {
+    let (mut d, f) = screen();
+    let card = d.create(f, NodeKind::Rectangle, "Card", 10.0, 20.0, 100.0, 60.0).unwrap();
+    // No setting: the short side, 1 px = 1 pt.
+    let e = export(&d, &[f], opts(0));
+    let ps = &e.documents[0].panel_settings;
+    assert_eq!((ps.scale_mode, ps.screen_match_mode, ps.source), ("ScaleWithScreenSize", "Expand", "shortSide"));
+    assert_eq!(ps.reference_resolution.x, ps.reference_resolution.y);
+    assert_eq!(ps.units_per_point, 1.0);
+    assert!(has(&rule(&e, card), "width: 100px;"));
+    assert!(!e.issues.iter().any(|i| i.rule == "ui-scaling"));
+    // 1080 × 1920 with Expand on a 375-wide screen: 1080/375 units per point.
+    let (w, h) = (d.node(f).unwrap().width, d.node(f).unwrap().height);
+    d.get_mut(f).unwrap().canvas_scaler =
+        Some(figcraft_doc::CanvasScaler { screen_match_mode: figcraft_doc::ScreenMatchMode::Expand, ..Default::default() });
+    let k = figcraft_doc::CanvasScaler { screen_match_mode: figcraft_doc::ScreenMatchMode::Expand, ..Default::default() }
+        .points_per_unit(w, h, figcraft_doc::ScreenDensity::default())
+        .map(|u| 1.0 / u)
+        .unwrap();
+    let e = export(&d, &[f], opts(0));
+    let ps = &e.documents[0].panel_settings;
+    assert_eq!((ps.reference_resolution.x, ps.reference_resolution.y, ps.source), (1080, 1920, "frame"));
+    assert!((ps.units_per_point - k).abs() < 1e-9);
+    let r = rule(&e, card);
+    let want = |v: f64| format!("{}px", (v * k * 1000.0).round() / 1000.0);
+    assert!(has(&r, &format!("width: {};", want(100.0))) && has(&r, &format!("height: {};", want(60.0))), "{r}");
+    assert!(!e.issues.iter().any(|i| i.rule == "ui-scaling"));
+    // Constant Pixel Size without a device: no density to work units out from.
+    d.get_mut(f).unwrap().canvas_scaler =
+        Some(figcraft_doc::CanvasScaler { scale_mode: figcraft_doc::UiScaleMode::ConstantPixelSize, ..Default::default() });
+    let e = export(&d, &[f], opts(0));
+    assert_eq!(e.documents[0].panel_settings.scale_mode, "ConstantPixelSize");
+    assert!(has(&rule(&e, card), "width: 100px;"));
+    assert!(e.issues.iter().any(|i| i.rule == "ui-scaling" && i.severity == crate::Severity::Warning));
+}
+
+#[test]
+fn scale_lengths_skips_quotes_and_words() {
+    assert_eq!(super::export::scale_lengths_for_tests("10px -2.5px 0px", 2.0), "20px -5px 0px");
+    assert_eq!(
+        super::export::scale_lengths_for_tests("drop-shadow(1px 2px 3px rgba(0, 0, 0, 0.5))", 2.0),
+        "drop-shadow(2px 4px 6px rgba(0, 0, 0, 0.5))"
+    );
+    assert_eq!(super::export::scale_lengths_for_tests("\"Font 12px\" -50% h1px", 2.0), "\"Font 12px\" -50% h1px");
+    assert_eq!(super::export::scale_lengths_for_tests("url(\"images/1px.png\") 4pxa", 2.0), "url(\"images/1px.png\") 4pxa");
+}

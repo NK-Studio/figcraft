@@ -1183,7 +1183,9 @@ pub fn resize_node(doc: &mut Document, id: NodeId, w: f64, h: f64) -> Result<()>
     let section = matches!(n.kind, NodeKind::Section { .. });
     // A frame with Unity's CanvasScaler: its contents scale as the canvas does, then their
     // constraints take up what's left (`docs/unity-uitk.md` › Canvas scaler).
-    let canvas = n.canvas_scaler.filter(|_| n.kind.is_frame_like()).map(|c| c.factor((ow, oh), (w, h))).filter(|k| (k - 1.0).abs() > 1e-9);
+    let density = n.device.as_ref().map(figcraft_doc::DeviceFrame::density).unwrap_or_default();
+    let canvas =
+        n.canvas_scaler.filter(|_| n.kind.is_frame_like()).map(|c| c.factor((ow, oh, density), (w, h, density))).filter(|k| (k - 1.0).abs() > 1e-9);
     if let Some(k) = canvas {
         scale_canvas_contents(doc, id, k)?;
         figcraft_layout::set_size(doc, id, w, h);

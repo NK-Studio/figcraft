@@ -116,6 +116,20 @@ impl Checker<'_> {
         self.out.push(Issue { id: self.n.id, name: self.n.name.clone(), severity, rule, message: message.into(), since });
     }
 
+    /// A top-level frame's UI scaling (`crate::panel_scaling`). Without a setting it exports as
+    /// its short side, which needs no warning.
+    fn scaling(&mut self) {
+        let s = crate::panel_scaling(self.n);
+        if s.from_frame && s.units_per_point.is_none() {
+            self.push(
+                Severity::Warning,
+                "ui-scaling",
+                "this UI scaling needs a device on the frame to work out panel units: exported at 1 unit per point",
+                None,
+            );
+        }
+    }
+
     fn v(&self) -> UnityVersion {
         self.opts.version
     }
@@ -135,6 +149,9 @@ impl Checker<'_> {
         }
         if n.pivot.is_some() && crate::layer_info(self.doc, n.id).is_some_and(|i| i.position != crate::Position::Absolute) {
             self.push(Severity::Warning, "pivot", "the pivot only places absolute layers: this one is placed by its parent", None);
+        }
+        if n.kind.is_frame_like() && n.parent.and_then(|p| self.doc.node(p)).is_some_and(|p| matches!(p.kind, NodeKind::Page { .. })) {
+            self.scaling();
         }
         if n.is_mask {
             self.push(Severity::Error, "mask", "masks have no UITK equivalent (only clip content: `overflow: hidden`)", None);
