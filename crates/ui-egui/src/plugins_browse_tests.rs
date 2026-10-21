@@ -217,7 +217,8 @@ fn browsing_and_installing_show_progress_and_never_wait() {
     assert!(u.app.session.waiting_for("plugin.directory.install"));
     assert!(shows(&mut u, "Installing…"), "the confirmation shows the install on its way");
     assert!(u.app.ui.plugins_manage.confirm.is_some() && u.app.session.prefs.plugins.is_empty());
-    assert!(saved.lock().unwrap().is_empty());
+    // Other preferences may be kept on the way (the directory browsed); the plugin isn't yet.
+    assert!(saved.lock().unwrap().iter().all(|p| p.plugins.is_empty()));
     assert_eq!(deliver(&wire, &bytes), 1);
     u.frame(vec![]);
     assert_eq!(u.app.session.prefs.plugins.len(), 1, "installed when the download arrived");

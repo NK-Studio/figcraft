@@ -583,7 +583,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                             let n = r["imported"].as_array().map_or(0, Vec::len);
                             app.toast(trn("Imported {n} devices", n, &[]));
                             // The folder is imported again at the next start.
-                            app.services.save_prefs(&app.session.prefs);
+                            app.save_prefs();
                         }
                     });
                 }

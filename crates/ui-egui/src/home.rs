@@ -431,7 +431,7 @@ fn getting_started(app: &mut FigApp, ui: &mut Ui, t: &Tokens) {
         tr("Hide these tips (Getting started in the Help menu shows them again)"),
     ) {
         app.run("help.gettingStarted", json!({"show": false}));
-        app.services.save_prefs(&app.session.prefs);
+        app.save_prefs();
     }
     for (i, (title, line, command)) in TIPS.into_iter().enumerate() {
         let cell = Rect::from_min_size(

@@ -795,6 +795,9 @@ pub struct FigApp {
     field_focus: bool,
     /// A panel's width changed and isn't kept in the preferences yet (its edge is being dragged).
     panels_unsaved: bool,
+    /// The preferences as last written: any change (a command from the control channel or MCP
+    /// included) is kept at once, so a crash doesn't lose remembered font folders or devices.
+    saved_prefs: Option<figcraft_engine::Prefs>,
     /// Control-channel requests waiting for the next frame.
     pub control_queue: Vec<ControlRequest>,
     /// Input events from the control channel (`ui.input`) for the next frame's raw input.
@@ -820,6 +823,12 @@ pub struct FigApp {
 pub type Done = Box<dyn FnOnce(&mut FigApp, &egui::Context, Value)>;
 
 impl FigApp {
+    /// Write the preferences now (and note them as written).
+    pub fn save_prefs(&mut self) {
+        self.services.save_prefs(&self.session.prefs);
+        self.saved_prefs = Some(self.session.prefs.clone());
+    }
+
     pub fn new(mut session: Session, services: Box<dyn Services>) -> Self {
         // Device folders imported before come back (`docs/device-profiles.md`), and font files
         // loaded before (text in their families draws with them, not a fallback).
@@ -840,6 +849,7 @@ impl FigApp {
             language: None,
             field_focus: false,
             panels_unsaved: false,
+            saved_prefs: None,
             control_queue: Vec::new(),
             control_input: Vec::new(),
             frame_stats: frame_stats::FrameStats::default(),
@@ -1006,7 +1016,7 @@ impl FigApp {
                         left.unwrap_or(if reset { PANEL_DEFAULT } else { self.ui.left_width }),
                         right.unwrap_or(if reset { PANEL_DEFAULT } else { self.ui.right_width }),
                     );
-                    self.services.save_prefs(&self.session.prefs);
+                    self.save_prefs();
                 }
                 "focus.region" => self.ui.nav.step(r.data.get("step").and_then(Value::as_i64).unwrap_or(1).clamp(-4, 4) as i32),
                 "panel.layers" => self.ui.left_tab = LeftTab::File,
@@ -1032,7 +1042,7 @@ impl FigApp {
                 "home.gettingStarted" => {
                     self.ui.home = true;
                     self.ui.home_view.section = home::Section::Recents;
-                    self.services.save_prefs(&self.session.prefs);
+                    self.save_prefs();
                 }
                 "dialog.saveAs" => self.save_as_dialog(),
                 "dialog.colorProfile" => self.ui.color_profile = self.session.doc().ok().map(|d| d.color_profile),
@@ -1554,7 +1564,14 @@ impl FigApp {
         // Plugins installed, removed or set up are kept at once: a crash doesn't lose them.
         // So are the owner tokens of files put online.
         if std::mem::take(&mut self.session.plugins.unsaved) | std::mem::take(&mut self.session.live.unsaved) {
-            self.services.save_prefs(&self.session.prefs);
+            self.save_prefs();
+        }
+        // Any other change to the preferences, once nothing is being dragged (a slider, a panel's
+        // edge): the first frame only notes what was loaded.
+        match &self.saved_prefs {
+            None => self.saved_prefs = Some(self.session.prefs.clone()),
+            Some(saved) if *saved != self.session.prefs && !ctx.input(|i| i.pointer.any_down()) => self.save_prefs(),
+            Some(_) => {}
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
@@ -1684,7 +1701,7 @@ impl FigApp {
         // Kept once the drag is over (not on every pointer move).
         if self.panels_unsaved && !ctx.input(|i| i.pointer.any_down()) {
             self.panels_unsaved = false;
-            self.services.save_prefs(&self.session.prefs);
+            self.save_prefs();
         }
         // Before the shortcuts: keys the hovered pane's prototype uses don't reach the editor, and
         // the arrows step through comment threads with the Comment tool.

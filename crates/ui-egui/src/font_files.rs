@@ -85,7 +85,7 @@ fn added(app: &mut FigApp, r: &serde_json::Value) {
         shown.push(trf("{n} more", &[("n", &(families.len() - shown.len()))]));
     }
     app.toast(trf("Fonts added: {families}", &[("families", &shown.join(", "))]));
-    app.services.save_prefs(&app.session.prefs);
+    app.save_prefs();
     crate::missing_fonts::refresh(app);
 }
 
@@ -130,7 +130,7 @@ pub fn prefs_section(app: &mut FigApp, ui: &mut egui::Ui) {
     });
     if let Some((cmd, path)) = remove {
         app.run(cmd, json!({"remove": path}));
-        app.services.save_prefs(&app.session.prefs);
+        app.save_prefs();
     }
     ui.horizontal(|ui| {
         if crate::widgets::button(ui, tr("Load font file…"), false, true).clicked() {
