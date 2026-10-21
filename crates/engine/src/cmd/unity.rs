@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.exportUitk",
             "Export to Unity UI Toolkit",
-            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity scripts into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write FigcraftPanelScale.cs and FigcraftSafeArea.cs, default true)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
+            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `images/` and the Unity script into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2), scripts? (write DesignPanelScaler.cs, default true; the safe area needs the com.nkstudio.figcraft Unity package)} → {version, documents: [{frame, name, stem, width, height, safeArea, uxml?, uss?}], files?, bakes, images, counts, issues}",
             false,
             file_export_uitk
         ),
@@ -303,9 +303,8 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         }
     }
     if scripts {
-        for (name, code) in [figcraft_uitk::scripts::PANEL_SCALE, figcraft_uitk::scripts::SAFE_AREA] {
-            put(name, code.as_bytes())?;
-        }
+        let (name, code) = figcraft_uitk::scripts::PANEL_SCALE;
+        put(name, code.as_bytes())?;
     }
     s.message = Some(format!("Exported {} frames for Unity {}", ex.documents.len(), opts.version));
     Ok(

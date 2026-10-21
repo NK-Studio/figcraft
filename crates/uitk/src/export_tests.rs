@@ -159,7 +159,9 @@ fn device_frames_get_a_safe_area_container() {
     let doc = &e.documents[0];
     assert!(doc.safe_area);
     let x = &doc.uxml;
-    let sa = x.find("name=\"PanelSafeArea\" class=\"panel-safe-area").unwrap();
+    let sa = x.find("<FigCraft.PanelSafeArea name=\"PanelSafeArea\"").unwrap();
+    assert!(x.contains("design-inset-top=\"50\" design-inset-right=\"0\" design-inset-bottom=\"30\" design-inset-left=\"0\""), "{x}");
+    assert!(x.contains("</FigCraft.PanelSafeArea>"), "{x}");
     assert!(x.find("name=\"Background\"").unwrap() < sa && x.find("name=\"Title\"").unwrap() > sa, "{x}");
     let r = rule_of(&doc.uss, &format!("__{}-safe-area {{", f.0));
     assert!(has(&r, "left: 0px;") && has(&r, "top: 50px;") && has(&r, "bottom: 30px;"), "{r}");

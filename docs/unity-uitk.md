@@ -191,7 +191,6 @@ writes, and the Design tab's Unity section has *Export to Unity…* (a folder pi
 <dir>/images/<hash>.<ext>   image fills, as stored
 <dir>/images/baked-<id>.png layers the target version can't draw (rendered at `scale`, 2 by default)
 <dir>/DesignPanelScaler.cs
-<dir>/PanelSafeAreaApplier.cs
 ```
 
 **Elements.** Frames, groups, rectangles → `ui:VisualElement`; text → `ui:Label` (its text in
@@ -231,20 +230,21 @@ resizes, but a line can be a point or two shorter than FigCraft's (U4). With `te
 | Background blur | — | 6.6: `backdrop-filter: blur(r/2)` |
 | Vectors, inner shadows, noise/texture/glass, dashed or non-solid strokes, crop/tile/pattern fills, several fills | baked (leaf layers) | — |
 
-**SafeArea.** A device frame's export has a `SafeArea` element (`panel-safe-area`) placed on
-the frame's safe area. Layers that fit inside it go in it, with coordinates from its top-left;
-layers reaching into the unsafe bands (backgrounds) stay on the root. With an auto layout frame,
-the container is the flex container, with the frame's padding less the insets. At run time
-`PanelSafeAreaApplier` moves every container onto `Screen.safeArea`.
+**Safe area.** A device frame's export has a `FigCraft.PanelSafeArea` element (the FigCraft Unity
+package) placed on the frame's safe area, with the frame's insets as `design-inset-top/right/bottom/left`.
+Layers that fit inside it go in it, with coordinates from its top-left; layers reaching into the
+unsafe bands (backgrounds) stay on the root. With an auto layout frame, the container is the flex
+container, with the frame's padding less the insets. In the Editor (Game view, Device Simulator) and
+at run time the element follows `Screen.safeArea`; in the UI Builder it shows the design insets.
 
 **In Unity.** Copy the folder into `Assets/` and show `<Frame>.uxml` on a GameObject with a
 **`PanelRenderer`** from Unity 6.5 (`UIDocument` isn't used there; it's the 6.0–6.4 path), with its
 PanelSettings (a runtime theme), and add `DesignPanelScaler` (set `designWidth` to the frame's
 portrait width in points; it switches the PanelSettings to Constant Pixel Size with
-`scale = short screen side / designWidth`) and `PanelSafeAreaApplier` next to it. The scripts pick the
-component by version (`#if UNITY_6000_5_OR_NEWER`): on 6.5+ they require a `PanelRenderer` and get
-its root from `RegisterUIReloadCallback` (the versioned callback from 6.6), before that a
-`UIDocument`. The scripts are the same in every export: keep one copy per project. Fonts are the
+`scale = short screen side / designWidth`) next to it. The script picks the component by version
+(`#if UNITY_6000_5_OR_NEWER`): a `PanelRenderer` on 6.5+, a `UIDocument` before. It is the same in
+every export: keep one copy per project. Device frames need the **`com.nkstudio.figcraft`** package
+(see below) for their `PanelSafeArea`. Fonts are the
 project's: each label carries `--design-font-family` and `--design-font-style` for a project style sheet
 to map to font assets. Exported images must import as **Texture (Default)** or as a single Sprite
 with a full-rect mesh: a project that imports PNGs as Sprites (Multiple, tight mesh) trims their
@@ -318,13 +318,13 @@ the same way before their constraints place them on the new safe area.
 The ArrowsAndCats card show (Unity 6.0, 1080 × 1920 Expand) imported this way keeps its layout from
 iPhone 12 mini to iPhone 13 Pro Max.
 
-## FigCraft Unity package (planned)
+## FigCraft Unity package
 
 **Principle: nothing that only works at run time.** Everything an export needs must show in the
 Editor without pressing Play — the Game view, the Device Simulator when the device changes, and the
-UI Builder where it can — and behave the same at run time. The scripts exported so far
-(`DesignPanelScaler`, `PanelSafeAreaApplier`) break that: they run in `Update()` (Play only), and the
-panel scale script writes into the PanelSettings asset, whose stale value then stays in edit mode.
+UI Builder where it can — and behave the same at run time. Scripts in `Update()` break that (Play
+only): the safe area script is gone; `DesignPanelScaler`, which also writes into the PanelSettings
+asset (whose stale value then stays in edit mode), goes when the scaling setting lands.
 
 The Unity side becomes a UPM package, **`com.nkstudio.figcraft`** (its own repository, not this
 Rust repo), replacing the generated scripts. Code style there and in the generated scripts: every
@@ -335,7 +335,8 @@ are qualified so they don't collide with other packages (`PanelSafeArea`, not `S
 | Need | How (works in edit mode, Simulator, run time) |
 |---|---|
 | UI scaling per frame | Native settings, no script: the frame's scaling (Constant Pixel Size / Scale With Screen Size / Constant Physical Size, reference resolution, Match / Expand / Shrink) written into the **PanelSettings asset** (UI Toolkit) or **CanvasScaler** (uGUI) by the package's editor importer from a settings file in the export |
-| Safe area | `PanelSafeArea`, a custom `VisualElement` (`[UxmlElement]`) reading `Screen.safeArea` |
+| Safe area | **Landed (0.1.0):** `PanelSafeArea`, a custom `VisualElement` (`[UxmlElement]`): absolute in its parent, insets where `Screen.safeArea` falls in the parent's padding box (so any parent works), on geometry changes and a 200 ms check (devices with the same panel size, a parent that moves); `exclude-top/right/bottom/left`; `design-inset-*` in the UI Builder |
+| Breakpoints (media query stand-in) | **Landed (0.1.0):** `PanelBreakpoints`: classes `panel-breakpoints--compact/--medium/--expanded` (width ≥ 600 / 840 panel units, attributes `medium-width`, `expanded-width`) and `--portrait/--landscape` from its parent's size, which its classes can't change (no feedback loop), with a `hysteresis` band (8); a `Changed` event for code. USS switches layouts with `.panel-breakpoints--expanded .card-grid { … }` |
 | `gap` before 6.7 | `FlexGapContainer` (`gap` attribute): spaces its visible children (wrap, reverse, children added, removed or hidden); native `gap` on 6.7+; a migration tool turns it into a plain element with `gap` |
 | `z-index` before 6.7, gradients before 6.7, `aspect-ratio` before 6.3 | custom elements of the same kind (child order; `generateVisualContent` meshes; size after layout) instead of baked images |
 | Shows the export | `PanelRenderer` from 6.5, `UIDocument` before |
@@ -354,9 +355,19 @@ baked image, and `unity.check` names the package version a file needs.
   panel to 91.6 pt wide. Exports set it to 1.
 - The Device Simulator can only be switched through internal API (`SimulatorWindow.main.deviceIndex`):
   fine for the test harness, never for the package.
-- Open: on iPad Mini 4 and iPhone X the panel size didn't match Scale With Screen Size worked out
-  from the simulated screen (375×812 and 609×812 where 609×812 and 375×812 were expected); to pin
-  down in the edit-mode harness (orientation, render target).
+- Resolved: the swapped iPad Mini 4 / iPhone X panel sizes were a stale read; read after the
+  device switch has been laid out they are 609×812 and 375×812, as Scale With Screen Size gives.
+
+**Package 0.1.0 check** (Unity 6000.6.0f1, edit mode, no Play; the card show on a PanelRenderer, Scale
+With Screen Size 375×812 Expand; devices switched through the harness):
+
+| Device | Panel | `PanelSafeArea` insets (t, r, b, l) | `PanelBreakpoints` |
+|---|---|---|---|
+| iPad Mini 4 | 609 × 812 | 0, 0, 0, 0 | — |
+| iPhone 12 mini | 375.09 × 812 | 50.36, 0, 33.69, 0 (FigCraft: 50.347, 33.681) | — |
+| iPhone X portrait | 375 × 812 | 44, 0, 34, 0 | compact, portrait |
+| iPhone X landscape | 1758.25 × 812 | 0, 95.27, 45.47, 95.27 | expanded, landscape |
+| UI Builder (editor panel) | canvas | 50.35, 0, 33.68, 0 (design insets) | — |
 
 ## Phases
 

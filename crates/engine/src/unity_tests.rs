@@ -131,9 +131,11 @@ fn export_returns_text_or_writes_a_folder() {
     let r = s.execute("file.exportUitk", &json!({"dir": dir.to_string_lossy(), "version": "6.3"})).unwrap();
     let files: Vec<String> = r["files"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
     let stem = r["documents"][0]["stem"].as_str().unwrap().to_string();
-    for want in [format!("{stem}.uxml"), format!("{stem}.uss"), "DesignPanelScaler.cs".into(), "PanelSafeAreaApplier.cs".into()] {
+    for want in [format!("{stem}.uxml"), format!("{stem}.uss"), "DesignPanelScaler.cs".into()] {
         assert!(dir.join(&want).is_file(), "{want} in {files:?}");
     }
+    // The safe area is the package's element now, not a script.
+    assert!(!dir.join("PanelSafeAreaApplier.cs").exists());
     let png = std::fs::read(dir.join(r["bakes"][0]["file"].as_str().unwrap())).unwrap();
     assert!(png.starts_with(b"\x89PNG"));
     assert!(r["documents"][0].get("uxml").is_none());

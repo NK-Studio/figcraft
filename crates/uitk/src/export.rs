@@ -3,9 +3,10 @@
 //! USS rule. What the target version can't
 //! draw is baked: the export lists those layers ([`Bake`]) and the caller renders them to PNG.
 //!
-//! Units: 1 USS px = 1 FigCraft point (the panel-scale rule). Device frames get a panel safe area
-//! container (`panel-safe-area`) holding the layers inside their safe area; Unity moves it
-//! onto `Screen.safeArea` (the generated `PanelSafeAreaApplier` script).
+//! Units: 1 USS px = 1 FigCraft point (the panel-scale rule). Device frames get a
+//! `FigCraft.PanelSafeArea` element (the FigCraft Unity package, `com.nkstudio.figcraft`) holding the
+//! layers inside their safe area; it follows `Screen.safeArea` in the Editor and at run time, and
+//! shows the frame's insets (`design-inset-*`) in the UI Builder.
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
@@ -99,7 +100,7 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
         let safe_area = n.device.is_some();
         w.root(n);
         let uxml = format!(
-            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. 1 px = 1 pt; see DesignPanelScaler and PanelSafeAreaApplier. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
+            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. 1 px = 1 pt; see DesignPanelScaler. Needs the com.nkstudio.figcraft package. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
             opts.version, w.uxml
         );
         let uss = format!("/* Exported by FigCraft for Unity {} from \"{}\". */\n{}", opts.version, n.name.replace("*/", "* /"), w.uss);
@@ -413,15 +414,16 @@ impl Writer<'_> {
         }
         let border = border_widths(n);
         self.write_children(n, &outside, border, (0.0, 0.0), (n.width, n.height), depth);
-        // The panel safe area container: placed on the frame's safe area here; Unity moves it onto
-        // Screen.safeArea (PanelSafeAreaApplier).
+        // The panel safe area container: placed on the frame's safe area here (and in the UI Builder,
+        // through its design insets); in the Editor and at run time it follows Screen.safeArea.
         let class = self.class(n.id, "-safe-area");
+        let (top, right, bottom, left) = (i.top - border[0], i.right - border[1], i.bottom - border[2], i.left - border[3]);
         let mut st = vec![
             ("position".to_string(), "absolute".to_string()),
-            ("left".into(), px(i.left - border[3])),
-            ("top".into(), px(i.top - border[0])),
-            ("right".into(), px(i.right - border[1])),
-            ("bottom".into(), px(i.bottom - border[2])),
+            ("left".into(), px(left)),
+            ("top".into(), px(top)),
+            ("right".into(), px(right)),
+            ("bottom".into(), px(bottom)),
         ];
         if flow {
             // The frame's padding already keeps clear of the unsafe bands: what's left of it.
@@ -434,12 +436,18 @@ impl Writer<'_> {
         }
         self.rule(&format!(".{class}"), &st);
         let indent = "    ".repeat(depth);
+        let open = format!(
+            "{indent}<FigCraft.PanelSafeArea name=\"PanelSafeArea\" class=\"{class}\" picking-mode=\"Ignore\" design-inset-top=\"{}\" design-inset-right=\"{}\" design-inset-bottom=\"{}\" design-inset-left=\"{}\"",
+            num(top),
+            num(right),
+            num(bottom),
+            num(left)
+        );
         if within.is_empty() {
-            let _ =
-                writeln!(self.uxml, "{indent}<ui:VisualElement name=\"PanelSafeArea\" class=\"panel-safe-area {class}\" picking-mode=\"Ignore\" />");
+            let _ = writeln!(self.uxml, "{open} />");
             return;
         }
-        let _ = writeln!(self.uxml, "{indent}<ui:VisualElement name=\"PanelSafeArea\" class=\"panel-safe-area {class}\" picking-mode=\"Ignore\">");
+        let _ = writeln!(self.uxml, "{open}>");
         let inner = (n.width - i.left - i.right, n.height - i.top - i.bottom);
         // Children of the container: coordinates from its top-left (the safe area's).
         let mut holder = n.clone();
@@ -448,7 +456,7 @@ impl Writer<'_> {
             al.padding = [(t - i.top).max(0.0), (r - i.right).max(0.0), (b - i.bottom).max(0.0), (l - i.left).max(0.0)];
         }
         self.write_children(&holder, &within, [0.0; 4], (i.left, i.top), inner, depth + 1);
-        let _ = writeln!(self.uxml, "{indent}</ui:VisualElement>");
+        let _ = writeln!(self.uxml, "{indent}</FigCraft.PanelSafeArea>");
     }
 
     fn placement(&self, n: &Node, place: Place, st: &mut Vec<(String, String)>) {
