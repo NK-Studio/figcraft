@@ -16,12 +16,12 @@ pub mod props;
 pub mod proto;
 pub mod proto_actions;
 pub mod section;
-pub mod structure;
-pub mod styles;
-pub mod text;
 pub mod spine;
 #[cfg(test)]
 mod spine_tests;
+pub mod structure;
+pub mod styles;
+pub mod text;
 pub mod unity;
 pub mod variables;
 pub mod variables_io;
