@@ -123,7 +123,7 @@ fn export_returns_text_or_writes_a_folder() {
     let d = &r["documents"][0];
     assert_eq!(d["frame"], json!(f));
     assert!(d["uxml"].as_str().unwrap().contains("<ui:UXML"));
-    assert!(d["uss"].as_str().unwrap().contains(&format!(".fc-{f} {{")));
+    assert!(d["uss"].as_str().unwrap().contains(&format!("__{f} {{")));
     assert_eq!(r["bakes"].as_array().unwrap().len(), 1, "the ellipse");
     // A folder: files, the baked PNG and the scripts.
     let dir = std::env::temp_dir().join(format!("figcraft-uitk-export-{}", std::process::id()));
@@ -131,7 +131,7 @@ fn export_returns_text_or_writes_a_folder() {
     let r = s.execute("file.exportUitk", &json!({"dir": dir.to_string_lossy(), "version": "6.3"})).unwrap();
     let files: Vec<String> = r["files"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect();
     let stem = r["documents"][0]["stem"].as_str().unwrap().to_string();
-    for want in [format!("{stem}.uxml"), format!("{stem}.uss"), "FigcraftPanelScale.cs".into(), "FigcraftSafeArea.cs".into()] {
+    for want in [format!("{stem}.uxml"), format!("{stem}.uss"), "DesignPanelScaler.cs".into(), "PanelSafeAreaApplier.cs".into()] {
         assert!(dir.join(&want).is_file(), "{want} in {files:?}");
     }
     let png = std::fs::read(dir.join(r["bakes"][0]["file"].as_str().unwrap())).unwrap();
@@ -164,7 +164,7 @@ fn text_boxes_follow_the_file_setting_or_the_parameter() {
     let f = frame_with_gap(&mut s);
     let t = s.execute("text.create", &json!({"text": "Hi", "x": 10, "y": 10, "parent": f})).unwrap()["id"].as_u64().unwrap();
     let uss = |s: &mut Session, p: serde_json::Value| s.execute("file.exportUitk", &p).unwrap()["documents"][0]["uss"].as_str().unwrap().to_string();
-    let label = |uss: &str| uss[uss.find(&format!(".fc-{t} {{")).unwrap()..].split('}').next().unwrap().to_string();
+    let label = |uss: &str| uss[uss.find(&format!("__{t} {{")).unwrap()..].split('}').next().unwrap().to_string();
     assert!(!label(&uss(&mut s, json!({"ids": [f]}))).contains("width:"));
     assert!(label(&uss(&mut s, json!({"ids": [f], "textBoxes": "fixed"}))).contains("width:"));
     let r = s.execute("unity.settings.set", &json!({"fixedTextBoxes": true})).unwrap();

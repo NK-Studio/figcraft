@@ -1,10 +1,11 @@
 //! UXML + USS for top-level frames (`docs/unity-uitk.md` › Export): one document per frame, each
-//! layer an element with its own class (`fc-<id>`) and one USS rule. What the target version can't
+//! layer an element with its own class (`<document>__<id>`, BEM style from the frame's name) and one
+//! USS rule. What the target version can't
 //! draw is baked: the export lists those layers ([`Bake`]) and the caller renders them to PNG.
 //!
-//! Units: 1 USS px = 1 FigCraft point (the panel-scale rule). Device frames get a SafeArea
-//! container (`figcraft-safe-area`) holding the layers inside their safe area; Unity moves it onto
-//! `Screen.safeArea` at run time (the generated `FigcraftSafeArea` script).
+//! Units: 1 USS px = 1 FigCraft point (the panel-scale rule). Device frames get a panel safe area
+//! container (`panel-safe-area`) holding the layers inside their safe area; Unity moves it
+//! onto `Screen.safeArea` (the generated `PanelSafeAreaApplier` script).
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt::Write as _;
@@ -52,7 +53,7 @@ pub struct UitkDocument {
     /// The frame's size in points: the panel-scale rule's design width is `width` (portrait).
     pub width: f64,
     pub height: f64,
-    /// The frame is a device frame: its document has a SafeArea container.
+    /// The frame is a device frame: its document has a panel safe area container.
     pub safe_area: bool,
 }
 
@@ -92,11 +93,13 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
             continue;
         }
         let stem = unique_stem(&n.name, &mut stems);
-        let mut w = Writer { doc, opts, fixed_text_boxes, uxml: String::new(), uss: String::new(), count: 0, bakes: Vec::new(), images: &mut images };
+        let block = block_name(&stem);
+        let mut w =
+            Writer { doc, opts, fixed_text_boxes, block, uxml: String::new(), uss: String::new(), count: 0, bakes: Vec::new(), images: &mut images };
         let safe_area = n.device.is_some();
         w.root(n);
         let uxml = format!(
-            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. 1 px = 1 pt; see FigcraftPanelScale and FigcraftSafeArea. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
+            "<ui:UXML xmlns:ui=\"UnityEngine.UIElements\" editor-extension-mode=\"False\">\n    <!-- Exported by FigCraft for Unity {}. 1 px = 1 pt; see DesignPanelScaler and PanelSafeAreaApplier. -->\n    <Style src=\"{stem}.uss\" />\n{}</ui:UXML>\n",
             opts.version, w.uxml
         );
         let uss = format!("/* Exported by FigCraft for Unity {} from \"{}\". */\n{}", opts.version, n.name.replace("*/", "* /"), w.uss);
@@ -107,6 +110,37 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
     let roots: Vec<NodeId> = out.documents.iter().map(|d| d.frame).collect();
     out.issues = crate::check(doc, &roots, opts);
     out
+}
+
+/// A BEM block name (kebab case, a letter first) from a file stem: "BunnyMagicCardShow" →
+/// "bunny-magic-card-show". Every class of the document starts with it, so the export's styles
+/// don't meet the project's.
+fn block_name(stem: &str) -> String {
+    let mut out = String::new();
+    let mut prev_lower_or_digit = false;
+    for c in stem.chars() {
+        if c.is_ascii_uppercase() {
+            if prev_lower_or_digit && !out.ends_with('-') {
+                out.push('-');
+            }
+            out.push(c.to_ascii_lowercase());
+            prev_lower_or_digit = false;
+        } else if c.is_ascii_alphanumeric() {
+            out.push(c);
+            prev_lower_or_digit = true;
+        } else {
+            if !out.is_empty() && !out.ends_with('-') {
+                out.push('-');
+            }
+            prev_lower_or_digit = false;
+        }
+    }
+    let out = out.trim_matches('-').to_string();
+    match out.chars().next() {
+        Some(c) if c.is_ascii_alphabetic() => out,
+        Some(_) => format!("screen-{out}"),
+        None => "screen".into(),
+    }
 }
 
 /// A file-safe stem from a layer name (ASCII letters, digits, `-` and `_`), unique in `taken`.
@@ -131,7 +165,7 @@ enum Place {
     /// The document's root: fills the panel.
     Root,
     /// On its own: `left`/`top`… in a containing box `size`, the layer's coordinates shifted by
-    /// `offset` (the parent's border, a SafeArea's insets).
+    /// `offset` (the parent's border, a panel safe area container's insets).
     Free { size: (f64, f64), offset: (f64, f64) },
     /// In an auto layout parent's flow (`row`: the main axis is horizontal), with the margin a gap
     /// becomes before UITK has `gap`.
@@ -142,6 +176,8 @@ struct Writer<'a> {
     doc: &'a Document,
     opts: CheckOptions,
     fixed_text_boxes: bool,
+    /// The document's BEM block: every class is `<block>__<layer id>[-part]`.
+    block: String,
     uxml: String,
     uss: String,
     count: usize,
@@ -224,6 +260,11 @@ fn border_widths(n: &Node) -> [f64; 4] {
 }
 
 impl Writer<'_> {
+    /// Layer `id`'s class (`<block>__<id>`), with an optional part suffix.
+    fn class(&self, id: NodeId, part: &str) -> String {
+        format!("{}__{}{}", self.block, id.0, part)
+    }
+
     fn version_has(&self, f: Feature) -> bool {
         self.opts.version.has(f)
     }
@@ -271,7 +312,7 @@ impl Writer<'_> {
         }
         // The element.
         let indent = "    ".repeat(depth);
-        let class = format!("fc-{}", n.id.0);
+        let class = self.class(n.id, "");
         let tag = if text { "ui:Label" } else { "ui:VisualElement" };
         let mut attrs = format!("name=\"{}\" class=\"{class}\"", xml(&n.name));
         if let NodeKind::Text(t) = &n.kind {
@@ -314,7 +355,7 @@ impl Writer<'_> {
     }
 
     /// Write `kids` of `n` into a box `size` whose layer coordinates are shifted by `shift` (the
-    /// parent's border, or a SafeArea's insets).
+    /// parent's border, or a panel safe area container's insets).
     fn write_children(&mut self, n: &Node, kids: &[NodeId], border: [f64; 4], shift: (f64, f64), size: (f64, f64), depth: usize) {
         let al = n.layout.as_ref();
         let row = al.is_some_and(|al| !matches!(al.mode, LayoutMode::Vertical));
@@ -343,7 +384,7 @@ impl Writer<'_> {
             self.element(c, place, depth);
             // 6.7+: "first on top" is a z-index (the first child highest).
             if al.is_some_and(|al| al.reverse_z) && self.version_has(Feature::ZIndex) {
-                let class = format!(".fc-{} {{", c.id.0);
+                let class = format!(".{} {{", self.class(c.id, ""));
                 if let Some(at) = self.uss.get(before..).and_then(|s| s.find(&class)).map(|p| p + before + class.len()) {
                     self.uss.insert_str(at, &format!("\n    z-index: {};", total - i));
                 }
@@ -351,7 +392,7 @@ impl Writer<'_> {
         }
     }
 
-    /// A device frame's children: the ones inside the safe area go into the SafeArea container
+    /// A device frame's children: the ones inside the safe area go into the panel safe area container
     /// (with an auto layout frame: every child in the flow), the rest stay on the root.
     fn device_children(&mut self, n: &Node, kids: &[NodeId], depth: usize) {
         let Some(d) = &n.device else { return };
@@ -372,9 +413,9 @@ impl Writer<'_> {
         }
         let border = border_widths(n);
         self.write_children(n, &outside, border, (0.0, 0.0), (n.width, n.height), depth);
-        // The SafeArea container: placed on the frame's safe area here; Unity moves it onto
-        // Screen.safeArea (FigcraftSafeArea).
-        let class = format!("fc-{}-safe-area", n.id.0);
+        // The panel safe area container: placed on the frame's safe area here; Unity moves it onto
+        // Screen.safeArea (PanelSafeAreaApplier).
+        let class = self.class(n.id, "-safe-area");
         let mut st = vec![
             ("position".to_string(), "absolute".to_string()),
             ("left".into(), px(i.left - border[3])),
@@ -395,10 +436,10 @@ impl Writer<'_> {
         let indent = "    ".repeat(depth);
         if within.is_empty() {
             let _ =
-                writeln!(self.uxml, "{indent}<ui:VisualElement name=\"SafeArea\" class=\"figcraft-safe-area {class}\" picking-mode=\"Ignore\" />");
+                writeln!(self.uxml, "{indent}<ui:VisualElement name=\"PanelSafeArea\" class=\"panel-safe-area {class}\" picking-mode=\"Ignore\" />");
             return;
         }
-        let _ = writeln!(self.uxml, "{indent}<ui:VisualElement name=\"SafeArea\" class=\"figcraft-safe-area {class}\" picking-mode=\"Ignore\">");
+        let _ = writeln!(self.uxml, "{indent}<ui:VisualElement name=\"PanelSafeArea\" class=\"panel-safe-area {class}\" picking-mode=\"Ignore\">");
         let inner = (n.width - i.left - i.right, n.height - i.top - i.bottom);
         // Children of the container: coordinates from its top-left (the safe area's).
         let mut holder = n.clone();
@@ -625,7 +666,7 @@ impl Writer<'_> {
 
     fn baked_overlay(&self, n: &Node, area: Rect) -> Option<(String, Vec<(String, String)>)> {
         let off = self.overlay_offset(n, area)?;
-        let cls = format!("fc-{}-baked", n.id.0);
+        let cls = self.class(n.id, "-baked");
         let st = vec![
             ("position".to_string(), "absolute".to_string()),
             ("left".into(), px(off.x0)),
@@ -744,8 +785,8 @@ impl Writer<'_> {
         };
         set("-unity-font-style", fs.into());
         // The font asset is the project's: the family and style travel as custom properties.
-        set("--fc-font-family", format!("\"{}\"", t.style.font_family.replace('"', "'")));
-        set("--fc-font-style", format!("\"{}\"", t.style.font_style.replace('"', "'")));
+        set("--design-font-family", format!("\"{}\"", t.style.font_family.replace('"', "'")));
+        set("--design-font-style", format!("\"{}\"", t.style.font_style.replace('"', "'")));
         match t.style.letter_spacing {
             LetterSpacing::Pixels(v) if v != 0.0 => set("letter-spacing", px(v)),
             LetterSpacing::Percent(p) if p != 0.0 => set("letter-spacing", px(p / 100.0 * t.style.font_size)),

@@ -2,7 +2,7 @@
 
 > **Status:** U1 landed (compatibility check: `figcraft-uitk`, `unity.check`); U2 landed (file
 > settings, layer position and pivot, the right panel's Unity section); U3 landed (UXML/USS
-> export, version-aware conversions, SafeArea container, Unity scripts); U4 run on Unity 6.6
+> export, version-aware conversions, panel safe area container, Unity scripts); U4 run on Unity 6.6
 > (layout matches on 5 devices: 75/75 with fixed text boxes). U5 planned.
 > **Owner area:** `crates/uitk` (L2), `UnitySettings` / `Pivot` in `crates/doc` (L1),
 > `crates/engine/src/cmd/unity.rs` (L5), `crates/ui-egui/src/unity_panel.rs` (L6).
@@ -57,7 +57,7 @@ table is rechecked when it ships.
   Scale With Screen Size / reference resolution modes don't give per-device equality and aren't the
   sync target (they can still be used for other UI).
 - **Safe area:** UITK doesn't apply it. The export wraps the content of a device frame in a
-  *SafeArea container* whose padding is `Screen.safeArea` converted to panel coordinates
+  *panel safe area container* whose padding is `Screen.safeArea` converted to panel coordinates
   (`RuntimePanelUtils.ScreenToPanel`), which is exactly what FigCraft draws on device frames.
   Layers that stand outside it in FigCraft (backgrounds that bleed under the status bar) stay
   outside it in the export.
@@ -187,11 +187,11 @@ writes, and the Design tab's Unity section has *Export to Unity…* (a folder pi
 
 ```
 <dir>/<Frame>.uxml          one per frame (the name made file-safe and unique)
-<dir>/<Frame>.uss           one rule per layer: .fc-<layer id> { … }
+<dir>/<Frame>.uss           one rule per layer: .<block>__<layer id> { … }   (block: the frame's name in kebab case)
 <dir>/images/<hash>.<ext>   image fills, as stored
 <dir>/images/baked-<id>.png layers the target version can't draw (rendered at `scale`, 2 by default)
-<dir>/FigcraftPanelScale.cs
-<dir>/FigcraftSafeArea.cs
+<dir>/DesignPanelScaler.cs
+<dir>/PanelSafeAreaApplier.cs
 ```
 
 **Elements.** Frames, groups, rectangles → `ui:VisualElement`; text → `ui:Label` (its text in
@@ -231,21 +231,21 @@ resizes, but a line can be a point or two shorter than FigCraft's (U4). With `te
 | Background blur | — | 6.6: `backdrop-filter: blur(r/2)` |
 | Vectors, inner shadows, noise/texture/glass, dashed or non-solid strokes, crop/tile/pattern fills, several fills | baked (leaf layers) | — |
 
-**SafeArea.** A device frame's export has a `SafeArea` element (`figcraft-safe-area`) placed on
+**SafeArea.** A device frame's export has a `SafeArea` element (`panel-safe-area`) placed on
 the frame's safe area. Layers that fit inside it go in it, with coordinates from its top-left;
 layers reaching into the unsafe bands (backgrounds) stay on the root. With an auto layout frame,
 the container is the flex container, with the frame's padding less the insets. At run time
-`FigcraftSafeArea` moves every container onto `Screen.safeArea`.
+`PanelSafeAreaApplier` moves every container onto `Screen.safeArea`.
 
 **In Unity.** Copy the folder into `Assets/` and show `<Frame>.uxml` on a GameObject with a
 **`PanelRenderer`** from Unity 6.5 (`UIDocument` isn't used there; it's the 6.0–6.4 path), with its
-PanelSettings (a runtime theme), and add `FigcraftPanelScale` (set `designWidth` to the frame's
+PanelSettings (a runtime theme), and add `DesignPanelScaler` (set `designWidth` to the frame's
 portrait width in points; it switches the PanelSettings to Constant Pixel Size with
-`scale = short screen side / designWidth`) and `FigcraftSafeArea` next to it. The scripts pick the
+`scale = short screen side / designWidth`) and `PanelSafeAreaApplier` next to it. The scripts pick the
 component by version (`#if UNITY_6000_5_OR_NEWER`): on 6.5+ they require a `PanelRenderer` and get
 its root from `RegisterUIReloadCallback` (the versioned callback from 6.6), before that a
 `UIDocument`. The scripts are the same in every export: keep one copy per project. Fonts are the
-project's: each label carries `--fc-font-family` and `--fc-font-style` for a project style sheet
+project's: each label carries `--design-font-family` and `--design-font-style` for a project style sheet
 to map to font assets. Exported images must import as **Texture (Default)** or as a single Sprite
 with a full-rect mesh: a project that imports PNGs as Sprites (Multiple, tight mesh) trims their
 transparent edges and stretches what's left (seen with letterboxed card images).
@@ -261,7 +261,7 @@ styles aren't carried (one style per label).
 `figcraft_side.py` builds a test design, exports it into a Unity project's `Assets/FigCraftTest/`
 and records every layer's rectangle (relative to the frame) after `frame.device.set` to each
 device; `unity_side.py` shows the export in a `UIDocument` in play mode, sizes the root to the
-device in points, puts the SafeArea on that device's insets (what `FigcraftSafeArea` computes on
+device in points, puts the SafeArea on that device's insets (what `PanelSafeAreaApplier` computes on
 the device), sets the panel scale to the device's (so layout rounds to its physical pixels), waits
 for the layout and reads each element's `worldBound`; `compare.py` diffs them (0.5 pt tolerance).
 
@@ -282,10 +282,10 @@ child in a frame with a 3 pt border.
 - The constraint, pivot (`left %` + `translate` + margin), scale (%), stretch and flexbox
   mappings give Unity's layout exactly, with gaps as margins (6.6).
 - Unity's USS importer takes the generated properties without warnings (`translate`,
-  `filter: drop-shadow()`, `--fc-*` custom properties).
+  `filter: drop-shadow()`, the `--design-*` custom properties).
 - **Fixed in FigCraft:** layers inside a device frame's safe area now follow the safe area when the
   device changes (`frame.device.set`, `frame.swapOrientation`), by their constraints — what the
-  SafeArea container does in Unity; before, FigCraft placed them against the whole frame (the
+  panel safe area container does in Unity; before, FigCraft placed them against the whole frame (the
   bottom-pinned button was 34 pt off on Pixel 5). Layers flush with a frame edge bleed and follow
   the frame (`DeviceFrame::holds`, shared by both).
 
@@ -294,7 +294,7 @@ the Editor to the front (`editor_focus`) before each device and waits for the ro
 device's size.
 
 **Still open:** text metrics in `auto` mode (matching FigCraft's line height to TextCore's), `gap` and gradients on 6.7, the blur radius
-halving, and the scripts on a real device (the run set the SafeArea the way `FigcraftSafeArea`
+halving, and the scripts on a real device (the run set the SafeArea the way `PanelSafeAreaApplier`
 does rather than through the Device Simulator).
 
 ## Canvas scaler
@@ -323,17 +323,20 @@ iPhone 12 mini to iPhone 13 Pro Max.
 **Principle: nothing that only works at run time.** Everything an export needs must show in the
 Editor without pressing Play — the Game view, the Device Simulator when the device changes, and the
 UI Builder where it can — and behave the same at run time. The scripts exported so far
-(`FigcraftPanelScale`, `FigcraftSafeArea`) break that: they run in `Update()` (Play only), and the
+(`DesignPanelScaler`, `PanelSafeAreaApplier`) break that: they run in `Update()` (Play only), and the
 panel scale script writes into the PanelSettings asset, whose stale value then stays in edit mode.
 
 The Unity side becomes a UPM package, **`com.nkstudio.figcraft`** (its own repository, not this
-Rust repo), replacing the generated scripts:
+Rust repo), replacing the generated scripts. Code style there and in the generated scripts: every
+member's access modifier is written out; the product name appears only in the namespace
+(`FigCraft`), never as a prefix of classes, elements, USS classes or properties; and generic names
+are qualified so they don't collide with other packages (`PanelSafeArea`, not `SafeArea`).
 
 | Need | How (works in edit mode, Simulator, run time) |
 |---|---|
 | UI scaling per frame | Native settings, no script: the frame's scaling (Constant Pixel Size / Scale With Screen Size / Constant Physical Size, reference resolution, Match / Expand / Shrink) written into the **PanelSettings asset** (UI Toolkit) or **CanvasScaler** (uGUI) by the package's editor importer from a settings file in the export |
-| Safe area | `<fc:SafeArea>`, a custom `VisualElement` (`[UxmlElement]`) reading `Screen.safeArea` |
-| `gap` before 6.7 | `<fc:Flex gap="…">`: spaces its visible children (wrap, reverse, children added, removed or hidden); native `gap` on 6.7+; a migration tool turns it into a plain element with `gap` |
+| Safe area | `PanelSafeArea`, a custom `VisualElement` (`[UxmlElement]`) reading `Screen.safeArea` |
+| `gap` before 6.7 | `FlexGapContainer` (`gap` attribute): spaces its visible children (wrap, reverse, children added, removed or hidden); native `gap` on 6.7+; a migration tool turns it into a plain element with `gap` |
 | `z-index` before 6.7, gradients before 6.7, `aspect-ratio` before 6.3 | custom elements of the same kind (child order; `generateVisualContent` meshes; size after layout) instead of baked images |
 | Shows the export | `PanelRenderer` from 6.5, `UIDocument` before |
 
@@ -344,7 +347,7 @@ baked image, and `unity.check` names the package version a file needs.
 - Code running inside a panel reads the **simulated** screen and safe area through the public API
   (`Screen.width/height`, `Screen.safeArea`) in edit mode, and they follow Device Simulator device
   changes (iPhone 12 mini 1080×2338, safe y 97; iPad Mini 4 1536×2048, none; iPhone X 1125×2436,
-  safe y 102). `<fc:SafeArea>` can use the public API only.
+  safe y 102). `PanelSafeArea` can use the public API only.
 - The panel resizes in edit mode when the device changes, and native **Scale With Screen Size**
   (reference 375×812, Expand) gives iPhone 12 mini a 375×812 panel with no script.
 - `PanelSettings.scale` multiplies every mode: a value left by a run-time script (4.096) shrank the

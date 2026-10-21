@@ -19,7 +19,7 @@ fn screen() -> (Document, NodeId) {
 
 /// The USS rule of layer `id` in the first document.
 fn rule(e: &Export, id: NodeId) -> String {
-    rule_of(&e.documents[0].uss, &format!(".fc-{} {{", id.0))
+    rule_of(&e.documents[0].uss, &format!("__{} {{", id.0))
 }
 
 fn rule_of(uss: &str, head: &str) -> String {
@@ -40,7 +40,9 @@ fn root_fills_the_panel_and_files_are_named_after_the_frame() {
     assert_eq!((doc.stem.as_str(), doc.width, doc.height, doc.safe_area), ("Main_Screen", 400.0, 800.0, false));
     assert!(doc.uxml.starts_with("<ui:UXML xmlns:ui=\"UnityEngine.UIElements\""));
     assert!(doc.uxml.contains("<Style src=\"Main_Screen.uss\" />"));
-    assert!(doc.uxml.contains(&format!("<ui:VisualElement name=\"Main Screen\" class=\"fc-{}\" />", f.0)));
+    // Classes are BEM by document: the block from the frame's name, then the layer id.
+    assert!(doc.uxml.contains(&format!("<ui:VisualElement name=\"Main Screen\" class=\"main-screen__{}\" />", f.0)), "{}", doc.uxml);
+    assert!(!doc.uxml.contains("fc-") && !doc.uss.contains("fc-"), "no product prefix in generated names");
     let r = rule(&e, f);
     for decl in ["position: absolute;", "left: 0;", "top: 0;", "right: 0;", "bottom: 0;", "background-color: rgba(255, 255, 255, 1);"] {
         assert!(has(&r, decl), "{decl} in {r}");
@@ -130,7 +132,7 @@ fn text_is_a_label() {
     t.style.font_style = "Bold Italic".into();
     let id = d.create(f, NodeKind::Text(t), "Title", 10.0, 10.0, 200.0, 40.0).unwrap();
     let e = export(&d, &[f], opts(0));
-    assert!(e.documents[0].uxml.contains("<ui:Label name=\"Title\" class=\"fc-"), "{}", e.documents[0].uxml);
+    assert!(e.documents[0].uxml.contains("<ui:Label name=\"Title\" class=\"main-screen__"), "{}", e.documents[0].uxml);
     assert!(e.documents[0].uxml.contains("text=\"Hello &lt;world&gt; &amp; &quot;you&quot;&#10;next\""));
     let r = rule(&e, id);
     for decl in
@@ -157,9 +159,9 @@ fn device_frames_get_a_safe_area_container() {
     let doc = &e.documents[0];
     assert!(doc.safe_area);
     let x = &doc.uxml;
-    let sa = x.find("name=\"SafeArea\" class=\"figcraft-safe-area").unwrap();
+    let sa = x.find("name=\"PanelSafeArea\" class=\"panel-safe-area").unwrap();
     assert!(x.find("name=\"Background\"").unwrap() < sa && x.find("name=\"Title\"").unwrap() > sa, "{x}");
-    let r = rule_of(&doc.uss, &format!(".fc-{}-safe-area {{", f.0));
+    let r = rule_of(&doc.uss, &format!("__{}-safe-area {{", f.0));
     assert!(has(&r, "left: 0px;") && has(&r, "top: 50px;") && has(&r, "bottom: 30px;"), "{r}");
     // Inside the container, coordinates start at the safe area.
     assert!(has(&rule(&e, title), "top: 10px;") && has(&rule(&e, title), "left: 20px;"));
@@ -198,7 +200,7 @@ fn shadows_are_filters_from_6_6_and_baked_with_an_overlay_before() {
     let e = export(&d, &[f], opts(0));
     assert_eq!(e.bakes.len(), 1);
     // The PNG reaches past the box: an overlay child draws it.
-    let over = rule_of(&e.documents[0].uss, &format!(".fc-{}-baked {{", card.0));
+    let over = rule_of(&e.documents[0].uss, &format!("__{}-baked {{", card.0));
     assert!(over.contains("background-image") && over.contains("left: -"), "{over}");
     assert!(e.documents[0].uxml.contains("name=\"Card (baked)\""));
 }
@@ -257,4 +259,18 @@ fn fixed_text_boxes_keep_figcrafts_size() {
     }
     let r = rule(&e, fill);
     assert!(!r.contains("width:") && has(&r, "flex-grow: 1;") && has(&r, "height: 24px;"), "{r}");
+}
+
+#[test]
+fn block_names_are_kebab_case_and_start_with_a_letter() {
+    let (mut d, _) = screen();
+    let p = d.first_page().unwrap();
+    let mut out = Vec::new();
+    for name in ["BunnyMagicCardShow", "12 Cards", "!!!", "iPhone_12 mini"] {
+        let f = d.create(p, NodeKind::Frame, name, 0.0, 0.0, 10.0, 10.0).unwrap();
+        let e = export(&d, &[f], opts(0));
+        let first = e.documents[0].uss.lines().find(|l| l.starts_with('.')).unwrap().to_string();
+        out.push(first.trim_start_matches('.').split("__").next().unwrap().to_string());
+    }
+    assert_eq!(out, vec!["bunny-magic-card-show", "screen-12-cards", "frame", "i-phone-12-mini"]);
 }
