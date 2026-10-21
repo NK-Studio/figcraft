@@ -191,11 +191,14 @@ writes, and the Design tab's Unity section has *Export to Unity…* (a folder pi
 <dir>/images/<hash>.<ext>   image fills, as stored
 <dir>/images/baked-<id>.png layers the target version can't draw (rendered at `scale`, 2 by default)
 <dir>/<Frame>.panelsettings.json   the frame's UI scaling, for Unity's PanelSettings
+<dir>/<Frame>.spine.json    Spine layers: the skeleton files under spine/ and the pose each shows (docs/spine.md)
 ```
 
 **Elements.** Frames, groups, rectangles → `ui:VisualElement`; text → `ui:Label` (its text in
 `text`, the line height as a `<line-height>` rich text tag); vector shapes and booleans → a
-`VisualElement` with their baked PNG as `background-image`. `name` is the layer name; hidden layers
+`VisualElement` with their baked PNG as `background-image`; Spine skeletons → a `VisualElement` with
+the class `spine-skeleton` and their current pose baked as the background, for the spine-unity
+runtime to animate ([`spine.md`](spine.md#unity-export)). `name` is the layer name; hidden layers
 are `display: none`; locked ones `picking-mode="Ignore"`. The root fills the panel
 (`position: absolute; left/top/right/bottom: 0`).
 

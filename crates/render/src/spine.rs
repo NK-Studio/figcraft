@@ -2,8 +2,8 @@
 //! time, drawn as textured triangles from the atlas pages in the image store.
 //!
 //! Each triangle is filled with its page as a pattern under the affine map that takes its UVs to
-//! its corners. Triangles grow by half a device pixel so anti-aliased edges between neighbours
-//! don't leave seams. Vertex tint is applied as opacity only (no RGB tint yet).
+//! its corners; neighbours under the same map fill as one path, and triangles grow by half a
+//! device pixel so anti-aliased edges between the rest don't leave seams. Vertex tint is applied as opacity only (no RGB tint yet).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
@@ -80,6 +80,9 @@ pub(crate) fn draw(doc: &Document, pix: &mut Pixmap, n: &Node, s: &SpineData, xf
             Blend::Screen => BlendMode::Screen,
         };
         let (pw, ph) = (f64::from(page.width()), f64::from(page.height()));
+        // Neighbouring triangles under the same UV map (a region's quad, flat mesh parts) fill as
+        // one path, so their shared edges leave no seam.
+        let mut run: Option<Run> = None;
         for tri in b.indices.chunks_exact(3) {
             let corner = |i: u32| -> Option<(Point, Point, f32)> {
                 let p = b.positions.get(i as usize)?;
@@ -89,11 +92,70 @@ pub(crate) fn draw(doc: &Document, pix: &mut Pixmap, n: &Node, s: &SpineData, xf
             };
             let (Some(a), Some(c1), Some(c2)) = (corner(tri[0]), corner(tri[1]), corner(tri[2])) else { continue };
             let opacity = ((a.2 + c1.2 + c2.2) / 3.0).clamp(0.0, 1.0);
+            let d = [a.0, c1.0, c2.0];
+            let Some(m) = texel_to_device([a.1, c1.1, c2.1], d) else { continue };
             if opacity <= 0.0 {
                 continue;
             }
-            fill_triangle(pix, &page, [a.0, c1.0, c2.0], [a.1, c1.1, c2.1], opacity, blend);
+            match &mut run {
+                Some(r) if r.matches(m, opacity) => r.tris.push(d),
+                _ => {
+                    if let Some(r) = run.take() {
+                        r.fill(pix, &page, blend);
+                    }
+                    run = Some(Run { map: m, opacity, tris: vec![d] });
+                }
+            }
         }
+        if let Some(r) = run {
+            r.fill(pix, &page, blend);
+        }
+    }
+}
+
+/// Triangles drawn with one UV map and opacity.
+struct Run {
+    map: Affine,
+    opacity: f32,
+    tris: Vec<[Point; 3]>,
+}
+
+impl Run {
+    fn matches(&self, m: Affine, opacity: f32) -> bool {
+        (self.opacity - opacity).abs() < 1e-4 && self.map.as_coeffs().iter().zip(m.as_coeffs()).all(|(a, b)| (a - b).abs() <= 1e-4 * (1.0 + a.abs()))
+    }
+
+    /// Fills the triangles, each grown half a device pixel from its centroid so they also overlap
+    /// the anti-aliased edges of neighbours in other runs. Every triangle is wound the same way so
+    /// overlaps add up instead of cancelling.
+    fn fill(&self, pix: &mut Pixmap, page: &Pixmap, blend: BlendMode) {
+        let mut pb = PathBuilder::new();
+        for d in &self.tris {
+            let centre = Point::new((d[0].x + d[1].x + d[2].x) / 3.0, (d[0].y + d[1].y + d[2].y) / 3.0);
+            let grow = |p: Point| {
+                let v = p - centre;
+                let len = v.hypot();
+                if len > 1e-6 { p + v * (0.5 / len) } else { p }
+            };
+            let [a, mut b, mut c] = d.map(grow);
+            if (b - a).cross(c - a) < 0.0 {
+                std::mem::swap(&mut b, &mut c);
+            }
+            pb.move_to(a.x as f32, a.y as f32);
+            pb.line_to(b.x as f32, b.y as f32);
+            pb.line_to(c.x as f32, c.y as f32);
+            pb.close();
+        }
+        let Some(path) = pb.finish() else { return };
+        let c = self.map.as_coeffs();
+        let transform = Transform::from_row(c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32, c[4] as f32, c[5] as f32);
+        let paint = Paint {
+            shader: tiny_skia::Pattern::new(page.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, self.opacity, transform),
+            anti_alias: true,
+            blend_mode: blend,
+            ..Paint::default()
+        };
+        pix.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
     }
 }
 
@@ -113,33 +175,6 @@ pub(crate) fn texel_to_device(t: [Point; 3], d: [Point; 3]) -> Option<Affine> {
     let off = d[0] - lin * t[0];
     let out = Affine::new([m[0], m[1], m[2], m[3], off.x, off.y]);
     out.as_coeffs().iter().all(|c| c.is_finite()).then_some(out)
-}
-
-fn fill_triangle(pix: &mut Pixmap, page: &Pixmap, d: [Point; 3], t: [Point; 3], opacity: f32, blend: BlendMode) {
-    let Some(m) = texel_to_device(t, d) else { return };
-    let c = m.as_coeffs();
-    let transform = Transform::from_row(c[0] as f32, c[1] as f32, c[2] as f32, c[3] as f32, c[4] as f32, c[5] as f32);
-    // Grow half a pixel away from the centroid so neighbours overlap their anti-aliased edges.
-    let centre = Point::new((d[0].x + d[1].x + d[2].x) / 3.0, (d[0].y + d[1].y + d[2].y) / 3.0);
-    let grow = |p: Point| {
-        let v = p - centre;
-        let len = v.hypot();
-        if len > 1e-6 { p + v * (0.5 / len) } else { p }
-    };
-    let mut pb = PathBuilder::new();
-    let [a, b, cc] = d.map(grow);
-    pb.move_to(a.x as f32, a.y as f32);
-    pb.line_to(b.x as f32, b.y as f32);
-    pb.line_to(cc.x as f32, cc.y as f32);
-    pb.close();
-    let Some(path) = pb.finish() else { return };
-    let paint = Paint {
-        shader: tiny_skia::Pattern::new(page.as_ref(), SpreadMode::Pad, FilterQuality::Bilinear, opacity, transform),
-        anti_alias: true,
-        blend_mode: blend,
-        ..Paint::default()
-    };
-    pix.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
 }
 
 /// Where playing Spine skeletons are `t` seconds in, at 60 frames a second: a frame number (a
