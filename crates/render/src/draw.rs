@@ -382,6 +382,11 @@ pub(crate) fn bounds_within<'a>(
             levels = None;
         }
     }
+    // A skeleton's animations can reach past the setup pose it was sized to.
+    if let NodeKind::Spine(_) = n.kind {
+        let m = n.width.max(n.height);
+        r = r.union(n.local_rect().inflate(m, m));
+    }
     // Text can overflow its box.
     if let NodeKind::Text(_) = n.kind {
         r = r.union(text_box_bounds(n).inflate(reach, reach));
@@ -661,6 +666,14 @@ fn draw_content(ctx: &Ctx, pix: &mut Pixmap, n: &Node, xf: Affine, depth: usize,
             draw_children(ctx, pix, n, xf, depth);
         }
         NodeKind::Group => draw_children(ctx, pix, n, xf, depth),
+        NodeKind::Spine(s) => {
+            if !ctx.outline_mode {
+                crate::spine::draw(doc, pix, n, s, xf, ctx.time);
+            }
+            if let Some(f) = over_fills {
+                f(pix);
+            }
+        }
         NodeKind::Text(_) if ctx.lod && lod::greeked(n, ctx.scale) => {
             lod::greek_text(pix, n, xf, text_box_bounds(n));
             if let Some(f) = over_fills {

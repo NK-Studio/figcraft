@@ -20,6 +20,7 @@ pub mod paint;
 pub mod pattern;
 pub mod retained;
 pub mod shadow;
+pub mod spine;
 
 pub use draw::{node_outline, paint_bounds, stroke_fill, subtree_outline, ts_path};
 pub use export_depth::{ExportDepthError, MAX_EXPORT_DEPTH, check_export_depth};
@@ -471,6 +472,8 @@ mod retained_tests;
 mod rtl_list_tests;
 #[cfg(test)]
 mod solo_tests;
+#[cfg(test)]
+mod spine_tests;
 #[cfg(test)]
 mod spread_tests;
 #[cfg(test)]

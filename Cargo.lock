@@ -1651,6 +1651,7 @@ dependencies = [
  "figcraft-doc",
  "figcraft-geom",
  "figcraft-pathops",
+ "figcraft-spine",
  "figcraft-text",
  "image",
  "log",

@@ -298,13 +298,17 @@ pub fn frame_at(hash: &str, data: Option<&ImageData>, filters: &ImageFilters, pr
     }
 }
 
-/// Where the animated GIFs in `root`'s visible fills and strokes are `t` seconds in: a number for
+/// Where the animated GIFs in `root`'s visible fills and strokes (and its playing Spine skeletons) are `t` seconds in: a number for
 /// the frames they show (a cache key) and the seconds until one of them changes. `None` when
 /// nothing there moves.
 /// shortcut: text runs with their own image fills aren't looked at; add them if anyone animates text.
 pub fn animation_clock(doc: &Document, root: NodeId, t: f64) -> Option<(u64, f64)> {
     let mut clock: Option<(u64, f64)> = None;
     for n in doc.subtree(root).into_iter().filter_map(|id| doc.node(id)).filter(|n| n.visible) {
+        if let Some((i, next)) = crate::spine::clock(n, t) {
+            let (key, soonest) = clock.unwrap_or((0, f64::INFINITY));
+            clock = Some((key.wrapping_mul(31).wrapping_add(i + 1), soonest.min(next)));
+        }
         for p in n.fills.iter().chain(&n.strokes).filter(|p| p.visible) {
             if let PaintKind::Image(img) = &p.kind
                 && let Some(a) = animation(&img.image, doc.images.get(&img.image), &img.filters, doc.color_profile)

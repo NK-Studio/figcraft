@@ -43,7 +43,7 @@ fn skeletons_round_trip() {
     assert_eq!(a.name, "hero");
     assert!(back.images.contains_key(&a.pages["page.png"]));
     let node = back.nodes().find(|n| matches!(n.kind, NodeKind::Spine(_))).unwrap();
-    let NodeKind::Spine(s) = &node.kind else { unreachable!() };
+    let s = if let NodeKind::Spine(s) = &node.kind { Some(s) } else { None }.unwrap();
     assert_eq!(s.asset, key);
     assert_eq!(s.animation.as_deref(), Some("run"));
     assert_eq!(s.speed, 2.0);
