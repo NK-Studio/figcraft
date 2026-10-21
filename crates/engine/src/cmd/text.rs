@@ -537,6 +537,45 @@ pub fn specs() -> Vec<CommandSpec> {
                 Ok(json!({"sources": s.prefs.font_sources}))
             }
         ),
+        spec!(
+            "text.addFontFolder",
+            "Add font folder",
+            "{path, remember? (default true: the folder is indexed again whenever the app starts; see text.fontFolders)}  adds the fonts in a folder and its subfolders (.ttf, .otf, .ttc, .otc) to the app's fonts without installing them; adding it again picks up files added since. The open document's auto-sizing text in its families fits them (text.refit) → {families, refitted: [ids]}",
+            true,
+            |s, p| {
+                let cmd = "text.addFontFolder";
+                let path = string(p, "path").ok_or_else(|| bad(cmd, "pass `path` (a folder)"))?;
+                // Automation reads only inside its roots.
+                let dir = crate::file_access::allow(&path, crate::file_access::Access::Read)?;
+                if !crate::file_access::is_dir(&path) {
+                    return Err(bad(cmd, format!("not a folder: {path}")));
+                }
+                let families = figcraft_text::load_font_dir(&dir);
+                if families.is_empty() {
+                    return Err(bad(cmd, "no font files in the folder"));
+                }
+                if boolean(p, "remember") != Some(false) {
+                    remember_folder(s, &path);
+                }
+                let refitted = crate::fonts::refit_open(s, None, Some(&families));
+                Ok(json!({"families": families, "refitted": refitted}))
+            }
+        ),
+        spec!(
+            "text.fontFolders",
+            "Remembered font folders",
+            "{remove? (a path), clear? (forget them all)}  the font folders text.addFontFolder remembers, indexed again whenever the app starts (fonts already added stay until it quits) → {folders}",
+            false,
+            |s, p| {
+                if boolean(p, "clear") == Some(true) {
+                    s.prefs.font_folders.clear();
+                } else if let Some(path) = string(p, "remove") {
+                    let abs = absolute(&path);
+                    s.prefs.font_folders.retain(|q| *q != abs && *q != path);
+                }
+                Ok(json!({"folders": s.prefs.font_folders}))
+            }
+        ),
     ]
 }
 
@@ -557,7 +596,17 @@ fn remember_font(s: &mut Session, path: &str) {
     sources.drain(..over);
 }
 
-/// Load the font files the preferences remember (at start-up, so text in their families draws
+/// Keep folder `path` (made absolute) in the preferences' font folders, newest last.
+fn remember_folder(s: &mut Session, path: &str) {
+    let p = absolute(path);
+    let folders = &mut s.prefs.font_folders;
+    folders.retain(|q| *q != p);
+    folders.push(p);
+    let over = folders.len().saturating_sub(figcraft_text::fontdb::MAX_FONT_DIRS);
+    folders.drain(..over);
+}
+
+/// Load the font files and folders the preferences remember (at start-up, so text in their families draws
 /// with them from the first frame); ones that are gone or unreadable are skipped quietly. Returns
 /// the families loaded.
 pub fn restore_fonts(s: &Session) -> Vec<String> {
@@ -566,6 +615,9 @@ pub fn restore_fonts(s: &Session) -> Vec<String> {
         if let Ok(bytes) = super::file::read_capped(src, figcraft_text::fontdb::MAX_FONT_FILE) {
             families.extend(figcraft_text::load_font_bytes(bytes));
         }
+    }
+    for dir in s.prefs.font_folders.iter().take(figcraft_text::fontdb::MAX_FONT_DIRS) {
+        families.extend(figcraft_text::load_font_dir(std::path::Path::new(dir)));
     }
     families
 }

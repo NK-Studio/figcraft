@@ -156,7 +156,8 @@ each.
 
 | | Figma | FigCraft |
 |---|---|---|
-| Local fonts | yes (font helper / desktop app) | yes (system scan) |
+| Local fonts | yes (font helper / desktop app) | yes (system scan; families shown and searched by their localized names) |
+| Fonts that aren't installed | no (install them) | yes: font files and folders from the font picker, Preferences ▸ Fonts, the missing-fonts dialog or a drop; loaded again at start-up |
 | Bundled/shared fonts | Google Fonts in the cloud | optional `CRAFT_FONTS_DIR` build input (storytold/craft-fonts) |
 | Variable fonts | yes | yes (axes, named instances, per-range axis values) |
 | Missing-font replacement on open | yes | warnings only (REST import) | 

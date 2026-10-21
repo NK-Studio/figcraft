@@ -247,3 +247,36 @@ fn loaded_font_files_come_back_at_start_up() {
     let _ = std::fs::remove_dir_all(&dir);
     assert!(crate::cmd::text::restore_fonts(&next).is_empty());
 }
+
+/// `text.addFontFolder {path}` adds a folder's fonts and remembers it; it comes back at start-up
+/// and `text.fontFolders` lists and forgets them. A localized family name stores the font's own.
+#[test]
+fn font_folders_come_back_at_start_up() {
+    let mut s = Session::new();
+    assert!(s.execute("text.addFontFolder", &json!({})).is_err());
+    assert!(s.execute("text.addFontFolder", &json!({"path": "no-such-dir"})).is_err());
+    let dir = std::env::temp_dir().join(format!("figcraft-font-folders-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let empty = dir.to_string_lossy().into_owned();
+    assert!(s.execute("text.addFontFolder", &json!({"path": empty})).is_err(), "no fonts");
+    assert!(s.prefs.font_folders.is_empty(), "a failed add isn't remembered");
+    std::fs::write(dir.join("Studio.ttf"), figcraft_text::fontdb::named_font_bytes(&[(0x0409, "Studio Folder 5e1"), (0x0412, "스튜디오 폴더")]))
+        .unwrap();
+    let r = s.execute("text.addFontFolder", &json!({"path": empty})).unwrap();
+    assert_eq!(r["families"], json!(["Studio Folder 5e1"]));
+    s.execute("text.addFontFolder", &json!({"path": empty})).unwrap();
+    assert_eq!(s.prefs.font_folders.len(), 1, "remembered once");
+    let mut next = Session::new();
+    next.prefs = s.prefs.clone();
+    assert!(crate::cmd::text::restore_fonts(&next).contains(&"Studio Folder 5e1".to_string()));
+    // The localized name stores the family's own name.
+    let t = text(&mut s, "Inter");
+    s.execute("text.style", &json!({"ids": [t], "fontFamily": "스튜디오 폴더"})).unwrap();
+    let NodeKind::Text(td) = &s.doc().unwrap().get(t).unwrap().kind else { panic!("not text") };
+    assert_eq!(td.style.font_family, "Studio Folder 5e1");
+    assert_eq!(s.execute("text.fontFolders", &json!({"remove": empty})).unwrap()["folders"], json!([]));
+    s.execute("text.addFontFolder", &json!({"path": empty})).unwrap();
+    assert_eq!(s.execute("text.fontFolders", &json!({"clear": true})).unwrap()["folders"], json!([]));
+    let _ = std::fs::remove_dir_all(&dir);
+}

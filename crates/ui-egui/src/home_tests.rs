@@ -573,6 +573,29 @@ fn dropping_a_file_without_one_on_disk_opens_it_as_a_new_unsaved_document() {
     assert!(!path.exists(), "nothing is written");
 }
 
+/// A font file or folder dropped on the window loads as fonts (remembered for the next start), not
+/// as a document; the toast names the families by the UI language's names.
+#[test]
+fn dropping_a_font_file_or_folder_adds_its_fonts() {
+    let dir = Temp::new();
+    let path = dir.path("Drop Sans.ttf");
+    std::fs::write(&path, figcraft_text::fontdb::named_font_bytes(&[(0x0409, "Drop Sans 4b7"), (0x0412, "드롭 산스")])).unwrap();
+    let mut u = first_run();
+    u.app.ui.home = true;
+    drop_file(&mut u, &path);
+    assert!(u.app.ui.pending_opens.is_empty(), "not opened as a document");
+    assert!(figcraft_text::has_family("Drop Sans 4b7"));
+    assert_eq!(u.app.session.prefs.font_sources.len(), 1);
+    assert!(u.app.ui.toast.as_ref().is_some_and(|t| t.0.contains("Drop Sans 4b7")), "{:?}", u.app.ui.toast);
+    // A folder.
+    let fonts = Temp::new();
+    std::fs::write(fonts.path("Folder.otf"), figcraft_text::fontdb::named_font_bytes(&[(0x0409, "Drop Folder 4b7")])).unwrap();
+    drop_file(&mut u, &fonts.0);
+    assert!(u.app.ui.pending_opens.is_empty(), "not imported");
+    assert!(figcraft_text::has_family("Drop Folder 4b7"));
+    assert_eq!(u.app.session.prefs.font_folders.len(), 1);
+}
+
 /// What a drop's read gives, once it has arrived.
 type Arrival = std::rc::Rc<std::cell::RefCell<Option<Result<Vec<u8>, String>>>>;
 

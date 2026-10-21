@@ -49,6 +49,13 @@ fn list(app: &mut FigApp, uid: u64) -> Option<Vec<Missing>> {
     Some(families)
 }
 
+/// List again what the open window's file misses (fonts were just added): the ones found go.
+pub fn refresh(app: &mut FigApp) {
+    if let Some(uid) = app.ui.missing_fonts.as_ref().filter(|m| !m.indexing).map(|m| m.uid) {
+        list(app, uid);
+    }
+}
+
 /// Text ▸ Missing fonts (`dialog.missingFonts`): the window for the file in front.
 pub fn request(app: &mut FigApp) {
     let Ok(uid) = app.session.ds().map(|d| d.uid) else { return };
@@ -80,6 +87,8 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
     let mut open = true;
     let mut close_clicked = false;
+    let mut add = None;
+    let mut rescan = false;
     crate::dialogs::window(tr("Missing fonts"), ctx).open(&mut open).show(ctx, |ui| {
         ui.set_width(380.0);
         if shown.indexing {
@@ -107,8 +116,28 @@ pub fn show(app: &mut FigApp, ctx: &egui::Context) {
             });
         }
         ui.add_space(12.0);
-        close_clicked = crate::widgets::button(ui, tr("Close"), true, true).clicked();
+        ui.horizontal(|ui| {
+            close_clicked = crate::widgets::button(ui, tr("Close"), true, true).clicked();
+            // A font that isn't installed can be loaded from its file or folder, or installed now.
+            if !shown.indexing && !shown.families.is_empty() {
+                if crate::widgets::button(ui, tr("Load font file…"), false, true).clicked() {
+                    add = Some(crate::font_files::Request::File);
+                }
+                if crate::widgets::button(ui, tr("Add font folder…"), false, true).clicked() {
+                    add = Some(crate::font_files::Request::Folder);
+                }
+                rescan = crate::widgets::button(ui, tr("Rescan fonts"), false, true)
+                    .on_hover_text(tr("Look again for fonts installed since FigCraft started"))
+                    .clicked();
+            }
+        });
     });
+    if let Some(r) = add {
+        crate::font_files::request(ctx, r);
+    }
+    if rescan {
+        crate::font_files::rescan(app);
+    }
     if !open || close_clicked {
         app.ui.missing_fonts = None;
     }

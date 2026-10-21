@@ -265,7 +265,7 @@ Hours in this narrative are the builders' estimates; the tables above supersede 
    to the shape; click, Shift-click and drag to select and move areas with their points).
    *Left:* vector QA with real files. 1–2 h.
 2. **Text editing depth**: *landed:* OpenType features panel, small caps, lists, title case,
-   truncation/max lines, font picker with previews and recents, word/line selection, IME commit,
+   truncation/max lines, font picker with previews and recents (families by their localized names, loading font files and folders), word/line selection, IME commit,
    inline IME composition (underlined at the caret, reflowing, candidate window at the caret; the
    document only gets the committed text), variable fonts (axes and named instances read from the
    font, named instances as styles, Type settings ▸ Variable sliders, per-range axis values applied

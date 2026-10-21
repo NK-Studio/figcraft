@@ -53,14 +53,20 @@ pub fn texture(ctx: &egui::Context, style: &TextStyle, text: &str, budget: &mut 
 /// A family's name in its own regular style (None when the family doesn't draw itself: symbol
 /// fonts, or it resolves to another family).
 pub fn family(ctx: &egui::Context, family: &str, size: f64, budget: &mut usize) -> Option<egui::TextureHandle> {
+    family_named(ctx, family, family, size, budget)
+}
+
+/// `label` (the family's name as the UI shows it: 나눔고딕 for NanumGothic) in `family`'s own
+/// regular style.
+pub fn family_named(ctx: &egui::Context, family: &str, label: &str, size: f64, budget: &mut usize) -> Option<egui::TextureHandle> {
     let styles = figcraft_text::family_styles(family);
     let style = styles.iter().find(|s| s.eq_ignore_ascii_case("Regular")).or(styles.first())?.clone();
     let face = figcraft_text::find_face(family, &style)?;
-    if !face.family.eq_ignore_ascii_case(family) || !family.chars().all(|c| c == ' ' || face.has_char(c)) {
+    if !face.family.eq_ignore_ascii_case(family) || !label.chars().all(|c| c == ' ' || face.has_char(c)) {
         return None;
     }
     let st = TextStyle { font_family: family.to_string(), font_style: style, font_size: size, ..TextStyle::default() };
-    texture(ctx, &st, family, budget)
+    texture(ctx, &st, label, budget)
 }
 
 fn render(ctx: &egui::Context, style: &TextStyle, text: &str, ppp: f64) -> Option<egui::TextureHandle> {

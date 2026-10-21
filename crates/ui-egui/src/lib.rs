@@ -23,6 +23,7 @@ pub mod device_bezel;
 pub mod dialogs;
 pub mod export_panel;
 pub mod field_math;
+pub mod font_files;
 pub mod font_preview;
 pub mod frame_labels;
 pub mod frame_presets;
@@ -1687,6 +1688,7 @@ impl FigApp {
         menus::popups(self, &ctx);
         variable_ui::picker(self, &ctx);
         style_picker::show(self, &ctx);
+        font_files::poll(self, &ctx);
         self.end_unwanted_text_preview(&ctx);
         self.end_pen_outside_design();
         dialogs::show(self, &ctx);

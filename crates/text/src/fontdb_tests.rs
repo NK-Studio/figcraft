@@ -2,7 +2,8 @@ use super::*;
 
 fn pending(styles: &[&str]) -> FontDb {
     let mut db = FontDb::default();
-    let entries = styles.iter().map(|s| Pending { path: format!("no-such-dir/{s}.ttf").into(), index: 0, style: (*s).into() }).collect();
+    let entries =
+        styles.iter().map(|s| Pending { path: format!("no-such-dir/{s}.ttf").into(), index: 0, style: (*s).into(), localized: Vec::new() }).collect();
     db.pending.insert("cjk ui".into(), ("CJK UI".into(), entries));
     db
 }
@@ -221,7 +222,7 @@ fn user_font_dirs_preserve_non_utf8_paths() {
 /// A rescan offers new families and the styles installed since, and never a file twice.
 #[test]
 fn a_rescan_offers_fonts_installed_since() {
-    let entry = |s: &str| Pending { path: format!("no-such-dir/{s}.ttf").into(), index: 0, style: s.into() };
+    let entry = |s: &str| Pending { path: format!("no-such-dir/{s}.ttf").into(), index: 0, style: s.into(), localized: Vec::new() };
     let mut db = pending(&["Regular"]);
     let found = |fams: &[(&str, &[&str])]| -> BTreeMap<String, (String, Vec<Pending>)> {
         fams.iter().map(|(f, styles)| (f.to_lowercase(), ((*f).to_string(), styles.iter().map(|s| entry(s)).collect()))).collect()
@@ -262,4 +263,85 @@ fn font_bytes_load_into_the_db() {
         assert_eq!(load_font_bytes(f.bytes.to_vec()), families);
         assert_eq!(db().read().unwrap().face_count(), faces);
     }
+}
+
+/// A font's family names in other languages are read with its English name, one per language.
+#[test]
+fn localized_family_names_are_indexed() {
+    let bytes = named_font_bytes(&[(0x0409, "Hangul Sans"), (0x0412, "한글 산스"), (0x0411, "ハングル"), (0x0404, "韓文")]);
+    let faces = faces_in(&bytes);
+    assert_eq!(faces.len(), 1);
+    let (_, family, _, localized) = &faces[0];
+    assert_eq!(family, "Hangul Sans");
+    let langs: Vec<&str> = localized.iter().map(|(l, _)| l.as_str()).collect();
+    assert_eq!(langs, ["ko-KR", "ja-JP", "zh-TW"]);
+    // An English-only font has none.
+    assert!(faces_in(&named_font_bytes(&[(0x0409, "Plain")]))[0].3.is_empty());
+}
+
+#[test]
+fn ui_languages_match_font_language_tags() {
+    assert!(language_matches("ko-KR", "ko"));
+    assert!(language_matches("ja-JP", "ja"));
+    assert!(!language_matches("ja-JP", "ko"));
+    assert!(language_matches("zh-CN", "zh-Hans"));
+    assert!(!language_matches("zh-TW", "zh-Hans"));
+    assert!(language_matches("zh-HK", "zh-Hant"));
+    assert!(!language_matches("", "ko"));
+}
+
+/// The picker shows a family in the UI language and finds it by any of its names; documents keep
+/// the font's own name.
+#[test]
+fn families_show_and_resolve_localized_names() {
+    let mut db = FontDb::default();
+    let entry = |names: &[(&str, &str)]| Pending {
+        path: "no-such-dir/x.ttf".into(),
+        index: 0,
+        style: "Regular".into(),
+        localized: names.iter().map(|(l, n)| ((*l).to_string(), (*n).to_string())).collect(),
+    };
+    let mut found = BTreeMap::new();
+    found.insert(
+        "nanumgothic".to_string(),
+        ("NanumGothic".to_string(), vec![entry(&[("ko-KR", "나눔고딕 ExtraBold")]), entry(&[("ko-KR", "나눔고딕")])]),
+    );
+    found.insert("arial".to_string(), ("Arial".to_string(), vec![entry(&[])]));
+    db.offer(found);
+    let ko = db.family_list("ko");
+    let nanum = ko.iter().find(|f| f.family == "NanumGothic").unwrap();
+    assert_eq!(nanum.display, "나눔고딕", "the shortest name per language");
+    assert_eq!(nanum.localized, ["나눔고딕"]);
+    assert_eq!(db.family_list("en").iter().find(|f| f.family == "NanumGothic").unwrap().display, "NanumGothic");
+    assert_eq!(ko.first().map(|f| f.family.as_str()), Some("Arial"), "sorted by the name shown");
+    assert!(db.has_family("나눔고딕") && db.has_family("나눔고딕 extrabold"));
+    assert_eq!(db.family_for_localized("나눔고딕").as_deref(), Some("NanumGothic"));
+    assert_eq!(db.family_for_localized("NanumGothic"), None);
+    assert_eq!(db.family_for_localized("No Such"), None);
+    assert_eq!(db.display_name("NanumGothic", "ko"), "나눔고딕");
+    assert_eq!(db.display_name("nanumgothic", "ja"), "nanumgothic");
+}
+
+/// A font folder's families are offered beside the system's; files already known are not offered
+/// twice, and junk adds nothing.
+#[test]
+fn font_folders_add_their_families() {
+    struct TempDir(std::path::PathBuf);
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    let tmp = TempDir(std::env::temp_dir().join(format!("figcraft-font-folder-{}", std::process::id())));
+    std::fs::create_dir_all(tmp.0.join("sub")).unwrap();
+    std::fs::write(tmp.0.join("sub/brand.ttf"), named_font_bytes(&[(0x0409, "Folder Brand 9c2"), (0x0412, "폴더 브랜드")])).unwrap();
+    std::fs::write(tmp.0.join("junk.otf"), b"not a font").unwrap();
+    assert_eq!(load_font_dir(&tmp.0), ["Folder Brand 9c2"]);
+    assert!(has_family("폴더 브랜드"));
+    assert_eq!(family_for_localized("폴더 브랜드").as_deref(), Some("Folder Brand 9c2"));
+    let pending = |n: &str| db().read().unwrap().pending.get(n).map_or(0, |(_, v)| v.len());
+    assert_eq!(pending("folder brand 9c2"), 1);
+    load_font_dir(&tmp.0);
+    assert_eq!(pending("folder brand 9c2"), 1, "the same file is not offered twice");
+    assert!(load_font_dir(&tmp.0.join("no-such")).is_empty());
 }

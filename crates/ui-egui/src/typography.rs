@@ -7,7 +7,7 @@
 
 use std::sync::Arc;
 
-use egui::{Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
+use egui::{Align, Align2, Color32, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_doc::*;
 use serde_json::{Value, json};
 
@@ -178,7 +178,8 @@ fn font_rows(app: &mut FigApp, ui: &mut Ui, ids: &[NodeId], styles: &[TextStyle]
     let fstyle = uniform(styles, |s| s.font_style.clone());
     row(ui, 32.0, |ui| {
         let w = ui.available_width();
-        let resp = widgets::dropdown(ui, family.as_deref().unwrap_or(tr(MIXED)), w, None);
+        let label = family.as_deref().map_or_else(|| tr(MIXED).to_string(), family_label);
+        let resp = widgets::dropdown(ui, &label, w, None);
         menu_popup(&resp).width(w.max(240.0)).close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside).show(|ui| {
             let pick = font_picker(ui, family.as_deref(), resp.clicked());
             if let Some(f) = pick.picked {
@@ -1138,6 +1139,24 @@ const RECENT_KEY: &str = "figcraft_recent_fonts";
 const ROW: f32 = 26.0;
 /// The font list's tallest (it scrolls past that).
 const LIST_HEIGHT: f32 = 380.0;
+/// The search field's height.
+const SEARCH_H: f32 = 28.0;
+
+/// The picker's footer: fonts that aren't installed, from a file or a folder
+/// ([`crate::font_files`] opens the dialog).
+fn load_buttons(ui: &mut Ui) {
+    ui.separator();
+    ui.horizontal(|ui| {
+        if widgets::button(ui, tr("Load font file…"), false, true).clicked() {
+            crate::font_files::request(ui.ctx(), crate::font_files::Request::File);
+            ui.close();
+        }
+        if widgets::button(ui, tr("Add font folder…"), false, true).clicked() {
+            crate::font_files::request(ui.ctx(), crate::font_files::Request::Folder);
+            ui.close();
+        }
+    });
+}
 
 fn recent_families(ctx: &egui::Context) -> Vec<String> {
     ctx.data_mut(|d| d.get_persisted::<Vec<String>>(Id::new(RECENT_KEY))).unwrap_or_default()
@@ -1154,7 +1173,18 @@ fn remember_family(ctx: &egui::Context, family: &str) {
 
 enum PickRow {
     Header(&'static str),
-    Family(String),
+    Family(figcraft_text::FamilyName),
+}
+
+/// The UI language's code, for fonts' localized names.
+fn ui_lang() -> &'static str {
+    crate::i18n::current().map_or("en", |l| l.code)
+}
+
+/// `family` as the UI shows it: its name in the UI language when the font has one (나눔고딕 for
+/// NanumGothic), else as stored.
+pub(crate) fn family_label(family: &str) -> String {
+    figcraft_text::family_display_name(family, ui_lang())
 }
 
 /// What the family list did this frame.
@@ -1185,18 +1215,35 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
         i.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowDown) as i64
             - i.count_and_consume_key(egui::Modifiers::NONE, egui::Key::ArrowUp) as i64
     });
-    let search = ui.add(egui::TextEdit::singleline(&mut q).hint_text(tr("Search fonts")).desired_width(ui.available_width()).font(regular(11.5)));
+    ui.add_space(2.0);
+    let search = ui.add(
+        egui::TextEdit::singleline(&mut q)
+            .hint_text(tr("Search fonts"))
+            .desired_width(ui.available_width())
+            .min_size(vec2(0.0, SEARCH_H))
+            .margin(vec2(8.0, 5.0))
+            .vertical_align(Align::Center)
+            .font(regular(13.0)),
+    );
     crate::widgets::select_all_on_focus(ui, &search, &q);
     if just_opened {
         search.request_focus();
     }
     ui.data_mut(|d| d.insert_temp(q_id, q.clone()));
     let ql = q.trim().to_lowercase();
-    let all = figcraft_text::family_names();
-    let matches: Vec<String> = all.iter().filter(|f| ql.is_empty() || f.to_lowercase().contains(&ql)).cloned().collect();
+    // Found by any of its names: "나눔" finds NanumGothic.
+    let all = figcraft_text::family_list(ui_lang());
+    let hit = |f: &figcraft_text::FamilyName| {
+        ql.is_empty()
+            || f.family.to_lowercase().contains(&ql)
+            || f.display.to_lowercase().contains(&ql)
+            || f.localized.iter().any(|n| n.to_lowercase().contains(&ql))
+    };
+    let matches: Vec<figcraft_text::FamilyName> = all.iter().filter(|f| hit(f)).cloned().collect();
     let mut rows: Vec<PickRow> = Vec::new();
     if ql.is_empty() {
-        let recent: Vec<String> = recent_families(ui.ctx()).into_iter().filter(|f| all.iter().any(|a| a.eq_ignore_ascii_case(f))).collect();
+        let recent: Vec<figcraft_text::FamilyName> =
+            recent_families(ui.ctx()).into_iter().filter_map(|r| all.iter().find(|a| a.family.eq_ignore_ascii_case(&r)).cloned()).collect();
         if !recent.is_empty() {
             rows.push(PickRow::Header(tr("Recent")));
             rows.extend(recent.into_iter().map(PickRow::Family));
@@ -1205,11 +1252,12 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
     }
     if matches.is_empty() {
         widgets::label(ui, tr("No fonts match"), t.text_tertiary);
+        load_buttons(ui);
         return FontPick::default();
     }
     rows.extend(matches.into_iter().map(PickRow::Family));
     let family = |i: usize| match rows.get(i) {
-        Some(PickRow::Family(f)) => Some(f.clone()),
+        Some(PickRow::Family(f)) => Some(f.family.clone()),
         _ => None,
     };
     // A new search starts again; the first step starts from the current family.
@@ -1219,7 +1267,7 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
     if step != 0 {
         let next = |i: usize| if step > 0 { i.checked_add(1) } else { i.checked_sub(1) };
         let mut from =
-            hi.or_else(|| rows.iter().rposition(|r| matches!(r, PickRow::Family(f) if current.is_some_and(|c| c.eq_ignore_ascii_case(f)))));
+            hi.or_else(|| rows.iter().rposition(|r| matches!(r, PickRow::Family(f) if current.is_some_and(|c| c.eq_ignore_ascii_case(&f.family)))));
         for _ in 0..step.unsigned_abs() {
             let mut at = match from {
                 Some(i) => next(i),
@@ -1251,7 +1299,7 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
     }
     if search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) {
         let first = rows.iter().find_map(|r| match r {
-            PickRow::Family(f) => Some(f.clone()),
+            PickRow::Family(f) => Some(f.family.clone()),
             PickRow::Header(_) => None,
         });
         return FontPick { picked: hi.and_then(family).or(first), highlighted: None, hovered: None };
@@ -1277,7 +1325,7 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
                         ui.painter().rect_filled(rect, CornerRadius::same(5), t.accent);
                     }
                     let col = if hovered { t.accent_on } else { t.text };
-                    if current.is_some_and(|c| c.eq_ignore_ascii_case(f)) {
+                    if current.is_some_and(|c| c.eq_ignore_ascii_case(&f.family)) {
                         icons::paint(
                             ui.painter(),
                             Rect::from_center_size(pos2(rect.min.x + 10.0, rect.center().y), vec2(12.0, 12.0)),
@@ -1286,7 +1334,7 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
                         );
                     }
                     let text_min = pos2(rect.min.x + 22.0, rect.min.y);
-                    match crate::font_preview::family(ui.ctx(), f, 13.0, &mut budget) {
+                    match crate::font_preview::family_named(ui.ctx(), &f.family, &f.display, 14.0, &mut budget) {
                         Some(tex) => {
                             crate::font_preview::paint(
                                 ui.painter(),
@@ -1298,20 +1346,25 @@ pub(crate) fn font_picker(ui: &mut Ui, current: Option<&str>, just_opened: bool)
                             );
                         }
                         None => {
-                            ui.painter().text(pos2(text_min.x, rect.center().y), Align2::LEFT_CENTER, f, regular(12.0), col);
+                            ui.painter().text(pos2(text_min.x, rect.center().y), Align2::LEFT_CENTER, &f.display, regular(13.0), col);
                         }
                     }
                     if resp.clicked() {
-                        picked = Some(f.clone());
+                        picked = Some(f.family.clone());
                     }
                     if resp.hovered() {
-                        hovered_family = Some(f.clone());
+                        hovered_family = Some(f.family.clone());
+                    }
+                    // A localized name tells what documents store.
+                    if f.display != f.family {
+                        resp.on_hover_text(&f.family);
                     }
                 }
             }
         }
     });
     ui.data_mut(|d| d.insert_temp(hi_id.with("view"), (shown.state.offset.y, shown.inner_rect.height())));
+    load_buttons(ui);
     FontPick { highlighted: hi.and_then(family), picked, hovered: hovered_family }
 }
 
@@ -1396,6 +1449,28 @@ mod tests {
         pick(&ctx, current, false, vec![key(egui::Key::ArrowDown)]);
         let enter = pick(&ctx, current, false, vec![key(egui::Key::Enter)]);
         assert_eq!(enter.picked.as_deref(), Some(all[1].as_str()));
+    }
+
+    /// A family is found by its localized name and picked by its own; the search field reads at
+    /// the size of the list.
+    #[test]
+    fn localized_family_names_are_searched_and_shown() {
+        let dir = std::env::temp_dir().join(format!("figcraft-picker-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("Seoul.ttf"), figcraft_text::fontdb::named_font_bytes(&[(0x0409, "Picker Seoul 3d1"), (0x0412, "피커 서울")]))
+            .unwrap();
+        // The folder stays while the picker reads the font (its previews).
+        figcraft_text::load_font_dir(&dir);
+        let ctx = egui::Context::default();
+        pick(&ctx, "Inter", true, vec![]);
+        pick(&ctx, "Inter", false, vec![egui::Event::Text("피커 서".into())]);
+        let typed = pick(&ctx, "Inter", false, vec![key(egui::Key::ArrowDown)]);
+        assert_eq!(typed.highlighted.as_deref(), Some("Picker Seoul 3d1"), "found by its Korean name, picked by its own");
+        let list = figcraft_text::family_list("ko");
+        assert_eq!(list.iter().find(|f| f.family == "Picker Seoul 3d1").map(|f| f.display.as_str()), Some("피커 서울"));
+        assert_eq!(figcraft_text::family_display_name("Picker Seoul 3d1", "ko"), "피커 서울");
+        assert_eq!(figcraft_text::family_display_name("Picker Seoul 3d1", "en"), "Picker Seoul 3d1");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

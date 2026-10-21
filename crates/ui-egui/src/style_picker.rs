@@ -441,7 +441,9 @@ fn style_row(ui: &mut Ui, s: &Style, key: Key, slot: StyleSlot, applied: bool, e
     let tip = match (s.description.is_empty(), text_def(s)) {
         (true, None) if !s.bound.is_empty() => Some(format!("{}\n{}", s.name, tr("Uses variables: each layer shows them in its own mode"))),
         (true, None) => None,
-        (true, Some(def)) => Some(format!("{}\n{} {} · {}", s.name, def.font_family, def.font_style, text_meta(def))),
+        (true, Some(def)) => {
+            Some(format!("{}\n{} {} · {}", s.name, crate::typography::family_label(&def.font_family), def.font_style, text_meta(def)))
+        }
         (false, _) => Some(s.description.clone()),
     };
     let resp = match tip {
@@ -487,7 +489,7 @@ fn style_grid(ui: &mut Ui, list: &[(&Style, Key)], applied: Option<&Key>, editab
                     ui.painter().rect_stroke(r.expand(2.0), CornerRadius::same(4), Stroke::new(1.0, t.menu_text), egui::StrokeKind::Inside);
                 }
                 let tip = match text_def(s) {
-                    Some(def) => format!("{}\n{} {} · {}", s.name, def.font_family, def.font_style, text_meta(def)),
+                    Some(def) => format!("{}\n{} {} · {}", s.name, crate::typography::family_label(&def.font_family), def.font_style, text_meta(def)),
                     None => s.name.clone(),
                 };
                 let resp = resp.on_hover_text(tip);
@@ -707,7 +709,7 @@ fn text_properties(ui: &mut Ui, id: &str, def: &TextStyle, out: &mut Frame) {
     let (r, _) = ui.allocate_exact_size(vec2(W, 40.0), Sense::hover());
     ui.painter().rect_filled(r, CornerRadius::same(5), Color32::from_white_alpha(14));
     text_sample(ui, def, "Ag", 28.0, pos2(r.min.x + 10.0, r.center().y), 60.0, r.height() - 4.0, &mut out.budget);
-    let summary = format!("{} {}\n{}", def.font_family, def.font_style, text_meta(def));
+    let summary = format!("{} {}\n{}", crate::typography::family_label(&def.font_family), def.font_style, text_meta(def));
     let g = ui.painter().layout(summary, regular(10.5), t.menu_dim, W - 80.0);
     ui.painter().galley(pos2(r.min.x + 72.0, r.center().y - g.size().y / 2.0), g, t.menu_dim);
     ui.add_space(6.0);
@@ -722,7 +724,7 @@ fn text_properties(ui: &mut Ui, id: &str, def: &TextStyle, out: &mut Frame) {
     // The dropdowns' menus open outside the dark scope (they're regular popups).
     let (family_resp, style_resp) = crate::theme::on_dark(ui, |ui| {
         ui.spacing_mut().item_spacing = vec2(8.0, 6.0);
-        let family_resp = widgets::dropdown(ui, &def.font_family, W, None).on_hover_text(tr("Font"));
+        let family_resp = widgets::dropdown(ui, &crate::typography::family_label(&def.font_family), W, None).on_hover_text(tr("Font"));
         let mut style_resp = None;
         ui.horizontal(|ui| {
             style_resp = Some(widgets::dropdown(ui, &def.font_style, half, None).on_hover_text(tr("Font style")));

@@ -319,6 +319,8 @@ pub fn show(app: &mut FigApp, ctx: &Context) {
                 let note = trf("{language}: draft translation, waiting for a native speaker's review.", &[("language", &lang.name)]);
                 crate::widgets::label(ui, &note, t.text_secondary);
             }
+            ui.add_space(12.0);
+            crate::font_files::prefs_section(app, ui);
         });
         if !open {
             app.ui.preferences = false;

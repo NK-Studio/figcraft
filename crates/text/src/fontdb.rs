@@ -85,6 +85,8 @@ pub fn axis_label(tag: &str) -> &str {
 pub struct Face {
     pub id: u32,
     pub family: String,
+    /// The family's names in other languages: (BCP-47 language, name).
+    pub localized: Vec<(String, String)>,
     pub style: String,
     pub weight: u16,
     pub italic: bool,
@@ -128,6 +130,7 @@ impl Face {
         let f = skrifa::FontRef::from_index(data, index).ok()?;
         let (family, style) = names(&f);
         let family = family_override.map(str::to_string).or(family)?;
+        let localized = localized_families(&f, &family);
         let style = style_override.map(str::to_string).or(style).unwrap_or_else(|| "Regular".into());
         let m = f.metrics(Size::unscaled(), LocationRef::default());
         let attrs = f.attributes();
@@ -160,6 +163,7 @@ impl Face {
             italic: !matches!(attrs.style, skrifa::attribute::Style::Normal) || style.to_ascii_lowercase().contains("italic"),
             weight,
             family,
+            localized,
             style,
             index,
             upem,
@@ -398,6 +402,65 @@ fn name_string(f: &skrifa::FontRef, id: StringId) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// A family's names in other languages: (BCP-47 language, name).
+type Localized = Vec<(String, String)>;
+
+/// The longest localized family name kept, and the most languages kept per font.
+const MAX_LOCALIZED_NAME: usize = 128;
+const MAX_LOCALIZED: usize = 16;
+
+/// A font's family names in languages other than English: (BCP-47 language, name), one per
+/// language, from the typographic family records when they have any, else the family records.
+/// Names equal to `family` are left out.
+fn localized_families(f: &skrifa::FontRef, family: &str) -> Vec<(String, String)> {
+    let mut out: Vec<(String, String)> = Vec::new();
+    for id in [StringId::TYPOGRAPHIC_FAMILY_NAME, StringId::FAMILY_NAME] {
+        for s in f.localized_strings(id) {
+            let Some(lang) = s.language() else { continue };
+            if lang.is_empty() || lang.to_ascii_lowercase().starts_with("en") || out.len() >= MAX_LOCALIZED {
+                continue;
+            }
+            let name: String = s.chars().take(MAX_LOCALIZED_NAME).collect();
+            let name = name.trim();
+            if name.is_empty() || name.starts_with('.') || name.eq_ignore_ascii_case(family) || out.iter().any(|(l, _)| l.eq_ignore_ascii_case(lang))
+            {
+                continue;
+            }
+            out.push((lang.to_string(), name.to_string()));
+        }
+        if !out.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+/// Whether a font's language tag `tag` (`ko-KR`, `zh-TW`) serves the UI language `ui` (`ko`,
+/// `zh-Hans`): the same language, and for Chinese the same script.
+fn language_matches(tag: &str, ui: &str) -> bool {
+    let (tag, ui) = (tag.to_ascii_lowercase(), ui.to_ascii_lowercase());
+    let primary = |s: &str| s.split(['-', '_']).next().unwrap_or("").to_string();
+    if primary(&tag) != primary(&ui) || primary(&tag).is_empty() {
+        return false;
+    }
+    if primary(&ui) != "zh" {
+        return true;
+    }
+    let traditional = |s: &str| ["hant", "tw", "hk", "mo"].iter().any(|t| s.split(['-', '_']).any(|p| p == *t));
+    traditional(&tag) == traditional(&ui)
+}
+
+/// A family the global db knows, with what the font picker shows and searches.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct FamilyName {
+    /// The name stored in documents (the font's English name).
+    pub family: String,
+    /// The name in the UI language when the font has one, else `family`.
+    pub display: String,
+    /// The family's names in other languages.
+    pub localized: Vec<String>,
+}
+
 /// (family, style) preferring the typographic names.
 fn names(f: &skrifa::FontRef) -> (Option<String>, Option<String>) {
     let family = name_string(f, StringId::TYPOGRAPHIC_FAMILY_NAME).or_else(|| name_string(f, StringId::FAMILY_NAME));
@@ -435,6 +498,7 @@ struct Pending {
     path: std::path::PathBuf,
     index: u32,
     style: String,
+    localized: Vec<(String, String)>,
 }
 
 #[derive(Default)]
@@ -448,6 +512,13 @@ pub struct FontDb {
     loaded_files: std::collections::BTreeSet<(std::path::PathBuf, u32)>,
     /// Font files added as bytes (hash and length → families), so loading one again adds nothing.
     loaded_bytes: std::collections::HashMap<(u64, usize), Vec<String>>,
+    /// Lower-case family → its names in other languages (language, name), the shortest per
+    /// language (a family's bold file may be named "나눔고딕 ExtraBold").
+    localized: BTreeMap<String, Vec<(String, String)>>,
+    /// Lower-case localized name → lower-case family.
+    by_localized: BTreeMap<String, String>,
+    /// Font folders added with [`load_font_dir`].
+    folders: Vec<std::path::PathBuf>,
     system_scanned: bool,
 }
 
@@ -494,6 +565,7 @@ impl FontDb {
     pub fn add(&mut self, face: Face) -> Arc<Face> {
         let key = face.family.to_lowercase();
         let display = face.family.clone();
+        self.note_localized(&key, &face.localized);
         let face = Arc::new(face);
         self.faces.push(face.clone());
         let idx = self.faces.len() - 1;
@@ -525,10 +597,89 @@ impl FontDb {
         v
     }
 
+    /// Every family with its name in the UI language `lang` and its other names, sorted by the
+    /// name shown.
+    pub fn family_list(&self, lang: &str) -> Vec<FamilyName> {
+        let mut v: Vec<FamilyName> = self
+            .families()
+            .into_iter()
+            .map(|family| {
+                let names = self.localized.get(&family.to_lowercase());
+                let display =
+                    names.and_then(|n| n.iter().find(|(l, _)| language_matches(l, lang))).map(|(_, n)| n.clone()).unwrap_or_else(|| family.clone());
+                let mut localized: Vec<String> = names.map(|n| n.iter().map(|(_, n)| n.clone()).collect()).unwrap_or_default();
+                localized.dedup();
+                FamilyName { family, display, localized }
+            })
+            .collect();
+        v.sort_by_cached_key(|f| f.display.to_lowercase());
+        v
+    }
+
+    /// `family`'s name in the UI language `lang` when the font has one, else `family` as given.
+    pub fn display_name(&self, family: &str, lang: &str) -> String {
+        self.localized
+            .get(&self.key(family))
+            .and_then(|n| n.iter().find(|(l, _)| language_matches(l, lang)))
+            .map_or_else(|| family.to_string(), |(_, n)| n.clone())
+    }
+
+    /// `family` as the db keys it (lower case): a family's own name, or one of its localized names.
+    fn key(&self, family: &str) -> String {
+        let k = family.to_lowercase();
+        if self.families.contains_key(&k) || self.pending.contains_key(&k) {
+            return k;
+        }
+        self.by_localized.get(&k).cloned().unwrap_or(k)
+    }
+
+    /// The family whose localized name is `name` (`나눔고딕` → `NanumGothic`); `None` for a family's
+    /// own name or an unknown one.
+    pub fn family_for_localized(&self, name: &str) -> Option<String> {
+        let k = name.to_lowercase();
+        if self.families.contains_key(&k) || self.pending.contains_key(&k) {
+            return None;
+        }
+        let key = self.by_localized.get(&k)?;
+        self.families.get(key).map(|(d, _)| d).or_else(|| self.pending.get(key).map(|(d, _)| d)).cloned()
+    }
+
+    /// Record a family's localized names (`key` lower case).
+    fn note_localized(&mut self, key: &str, names: &[(String, String)]) {
+        if names.is_empty() {
+            return;
+        }
+        let known = self.localized.entry(key.to_string()).or_default();
+        for (lang, name) in names {
+            match known.iter().position(|(l, _)| l.eq_ignore_ascii_case(lang)) {
+                Some(i) => {
+                    if let Some(k) = known.get_mut(i).filter(|k| name.chars().count() < k.1.chars().count()) {
+                        k.1 = name.clone();
+                    }
+                }
+                None if known.len() < MAX_LOCALIZED => known.push((lang.clone(), name.clone())),
+                None => {}
+            }
+            self.by_localized.entry(name.to_lowercase()).or_insert_with(|| key.to_string());
+        }
+    }
+
+    /// Record the localized names of pending (system or folder) faces.
+    fn note_pending_localized(&mut self) {
+        let found: Vec<(String, Vec<(String, String)>)> = self
+            .pending
+            .iter()
+            .flat_map(|(k, (_, v))| v.iter().filter(|e| !e.localized.is_empty()).map(|e| (k.clone(), e.localized.clone())))
+            .collect();
+        for (k, names) in found {
+            self.note_localized(&k, &names);
+        }
+    }
+
     /// Style names of a family, by weight then italic.
     pub fn styles(&mut self, family: &str) -> Vec<String> {
         self.load_family(family, None);
-        let Some((_, idx)) = self.families.get(&family.to_lowercase()) else { return vec![] };
+        let Some((_, idx)) = self.families.get(&self.key(family)) else { return vec![] };
         // (weight, italic, order in the font, name): named instances keep the font's order.
         let mut v: Vec<(u16, bool, usize, String)> = Vec::new();
         for f in idx.iter().filter_map(|i| self.faces.get(*i)) {
@@ -550,14 +701,14 @@ impl FontDb {
     }
 
     pub fn has_family(&self, family: &str) -> bool {
-        let k = family.to_lowercase();
+        let k = self.key(family);
         self.families.contains_key(&k) || self.pending.contains_key(&k)
     }
 
     /// Read a system family's faces from disk; with `only`, just the face nearest that style (the
     /// rest stay pending).
     fn load_family(&mut self, family: &str, only: Option<&str>) {
-        let key = family.to_lowercase();
+        let key = self.key(family);
         let entries = match only {
             None => match self.pending.remove(&key) {
                 Some((_, entries)) => entries,
@@ -608,7 +759,7 @@ impl FontDb {
     /// `style`: a fallback for missing characters needs one face, not every file of a CJK family
     /// (10–20 MB each). The family's other faces load when it is used by name.
     pub fn find_one(&mut self, family: &str, style: &str) -> Option<Arc<Face>> {
-        if !self.families.contains_key(&family.to_lowercase()) {
+        if !self.families.contains_key(&self.key(family)) {
             self.load_family(family, Some(style));
         }
         self.best(family, style)
@@ -616,7 +767,7 @@ impl FontDb {
 
     /// The loaded face of `family` nearest `style`.
     fn best(&self, family: &str, style: &str) -> Option<Arc<Face>> {
-        let (_, idx) = self.families.get(&family.to_lowercase())?;
+        let (_, idx) = self.families.get(&self.key(family))?;
         let faces: Vec<&Arc<Face>> = idx.iter().filter_map(|i| self.faces.get(*i)).collect();
         let want = norm_style(style);
         if let Some(f) = faces.iter().find(|f| norm_style(&f.style) == want).or_else(|| faces.iter().find(|f| f.instance(style).is_some())) {
@@ -710,7 +861,29 @@ impl FontDb {
             out.changed.push(display.clone());
             self.pending.insert(k, (display, entries));
         }
+        self.note_pending_localized();
         out
+    }
+
+    /// Offer the faces of a font folder walk alongside those already known: a family keeps every
+    /// file it has and gains the ones it hasn't seen (read when it is next used). Returns the
+    /// families that gained faces.
+    fn offer(&mut self, found: BTreeMap<String, (String, Vec<Pending>)>) -> Vec<String> {
+        let mut changed = Vec::new();
+        for (k, (display, entries)) in found {
+            let waiting = self.pending.get(&k).map(|(_, v)| v.iter().map(|e| (e.path.clone(), e.index)).collect::<Vec<_>>()).unwrap_or_default();
+            let new: Vec<Pending> = entries
+                .into_iter()
+                .filter(|e| !self.loaded_files.contains(&(e.path.clone(), e.index)) && !waiting.contains(&(e.path.clone(), e.index)))
+                .collect();
+            if new.is_empty() {
+                continue;
+            }
+            changed.push(self.families.get(&k).map_or_else(|| display.clone(), |(d, _)| d.clone()));
+            self.pending.entry(k).or_insert_with(|| (display, Vec::new())).1.extend(new);
+        }
+        self.note_pending_localized();
+        changed
     }
 
     /// Index the system font directories (desktop only): family names are read now, faces loaded
@@ -728,6 +901,7 @@ impl FontDb {
         for k in embedded {
             self.pending.remove(&k);
         }
+        self.note_pending_localized();
     }
 }
 
@@ -823,8 +997,13 @@ fn scan_dir(dir: &std::path::Path, depth: usize, out: &mut BTreeMap<String, (Str
             continue;
         }
         let Some(bytes) = usize::try_from(meta.len()).ok().and_then(|l| index_bytes(&path, l)) else { continue };
-        for (index, family, style) in faces_in(&bytes) {
-            out.entry(family.to_lowercase()).or_insert_with(|| (family.clone(), Vec::new())).1.push(Pending { path: path.clone(), index, style });
+        for (index, family, style, localized) in faces_in(&bytes) {
+            out.entry(family.to_lowercase()).or_insert_with(|| (family.clone(), Vec::new())).1.push(Pending {
+                path: path.clone(),
+                index,
+                style,
+                localized,
+            });
         }
     }
 }
@@ -868,9 +1047,10 @@ fn index_bytes(path: &std::path::Path, len: usize) -> Option<Vec<u8>> {
     Some(buf)
 }
 
-/// (index, family, style) of each face in a font file: outline fonts and colour fonts (Apple Color
-/// Emoji draws most emoji from `sbix`, Noto Color Emoji has no outlines at all).
-fn faces_in(bytes: &[u8]) -> Vec<(u32, String, String)> {
+/// (index, family, style, localized family names) of each face in a font file: outline fonts and
+/// colour fonts (Apple Color Emoji draws most emoji from `sbix`, Noto Color Emoji has no outlines at
+/// all).
+fn faces_in(bytes: &[u8]) -> Vec<(u32, String, String, Localized)> {
     let count = match FileRef::new(bytes) {
         Ok(FileRef::Collection(c)) => c.len(),
         Ok(FileRef::Font(_)) => 1,
@@ -885,7 +1065,8 @@ fn faces_in(bytes: &[u8]) -> Vec<(u32, String, String)> {
                 .then_some(())?;
             let (family, style) = names(&f);
             let family = family.filter(|f| !f.starts_with('.'))?;
-            Some((i, family, style.unwrap_or_else(|| "Regular".into())))
+            let localized = localized_families(&f, &family);
+            Some((i, family, style.unwrap_or_else(|| "Regular".into()), localized))
         })
         .collect()
 }
@@ -901,7 +1082,25 @@ pub fn family_names() -> Vec<String> {
     db().read().unwrap_or_else(std::sync::PoisonError::into_inner).families()
 }
 
-/// The global db has `family` (embedded, loaded or indexed; any case).
+/// Every family in the global db with its name in the UI language `lang` (`ko`, `zh-Hans`), for a
+/// font picker.
+pub fn family_list(lang: &str) -> Vec<FamilyName> {
+    db().read().unwrap_or_else(std::sync::PoisonError::into_inner).family_list(lang)
+}
+
+/// `family`'s name in the UI language `lang` (`ko`, `zh-Hans`) when the font has one, else
+/// `family`.
+pub fn family_display_name(family: &str, lang: &str) -> String {
+    db().read().unwrap_or_else(std::sync::PoisonError::into_inner).display_name(family, lang)
+}
+
+/// The family whose localized name is `name` (`나눔고딕` → `NanumGothic`), so documents keep the
+/// font's own name; `None` for a family's own name or an unknown one.
+pub fn family_for_localized(name: &str) -> Option<String> {
+    db().read().unwrap_or_else(std::sync::PoisonError::into_inner).family_for_localized(name)
+}
+
+/// The global db has `family` (embedded, loaded or indexed; any case, or a localized name).
 pub fn has_family(family: &str) -> bool {
     db().read().unwrap_or_else(std::sync::PoisonError::into_inner).has_family(family)
 }
@@ -925,11 +1124,9 @@ pub fn scan_system_fonts() {
             }
             let mut w = raw_db().write().unwrap_or_else(std::sync::PoisonError::into_inner);
             w.system_scanned = true;
-            for (k, v) in found {
-                if !w.families.contains_key(&k) {
-                    w.pending.entry(k).or_insert(v);
-                }
-            }
+            // Embedded families win; a font folder added meanwhile keeps its files.
+            found.retain(|k, _| !w.families.contains_key(k));
+            w.offer(found);
             drop(w);
             crate::clear_layout_cache();
         }
@@ -950,7 +1147,8 @@ pub fn rescan_system_fonts() -> Rescan {
             return Rescan { changed: added.clone(), added };
         }
         let mut found: BTreeMap<String, (String, Vec<Pending>)> = BTreeMap::new();
-        for dir in system_font_dirs() {
+        let folders = raw_db().read().unwrap_or_else(std::sync::PoisonError::into_inner).folders.clone();
+        for dir in system_font_dirs().into_iter().chain(folders) {
             scan_dir(&dir, 0, &mut found);
         }
         let rescan = raw_db().write().unwrap_or_else(std::sync::PoisonError::into_inner).merge_rescan(found);
@@ -980,6 +1178,32 @@ pub fn load_font_bytes(bytes: Vec<u8>) -> Vec<String> {
     if !families.is_empty() {
         db.loaded_bytes.insert(key, families.clone());
         drop(db);
+        crate::clear_layout_cache();
+    }
+    families
+}
+
+/// The most font folders [`load_font_dir`] keeps.
+pub const MAX_FONT_DIRS: usize = 32;
+
+/// Add the fonts in folder `dir` and its subfolders (.ttf, .otf, .ttc, .otc) to the global db
+/// without installing them, like the system fonts: names are read now, faces when first used.
+/// Returns the families of its fonts (none: no font files, or not a folder); adding a folder again
+/// picks up the files added since, and later rescans walk it too.
+pub fn load_font_dir(dir: &std::path::Path) -> Vec<String> {
+    let mut found: BTreeMap<String, (String, Vec<Pending>)> = BTreeMap::new();
+    scan_dir(dir, 0, &mut found);
+    let families: Vec<String> = found.values().map(|(d, _)| d.clone()).collect();
+    if families.is_empty() {
+        return families;
+    }
+    let mut w = db().write().unwrap_or_else(std::sync::PoisonError::into_inner);
+    if !w.folders.iter().any(|f| f == dir) && w.folders.len() < MAX_FONT_DIRS {
+        w.folders.push(dir.to_path_buf());
+    }
+    let changed = w.offer(found);
+    drop(w);
+    if !changed.is_empty() {
         crate::clear_layout_cache();
     }
     families
@@ -1017,6 +1241,48 @@ pub fn system_fonts_scanned() -> bool {
 pub fn face_with_char(c: char, families: &[&str]) -> Option<Arc<Face>> {
     let mut db = db().write().unwrap_or_else(std::sync::PoisonError::into_inner);
     families.iter().filter_map(|f| db.find_one(f, "Regular")).find(|f| f.has_char(c))
+}
+
+/// A minimal font file, for tests of font lists: an empty `glyf` (so it counts as an outline font) and a `name` table with
+/// family `records` (Windows language id, name). It has no glyphs: it can be indexed, not drawn.
+#[doc(hidden)]
+pub fn named_font_bytes(records: &[(u16, &str)]) -> Vec<u8> {
+    let mut strings = Vec::new();
+    let mut recs = Vec::new();
+    for (lang, name) in records {
+        let utf16: Vec<u8> = name.encode_utf16().flat_map(u16::to_be_bytes).collect();
+        // platform 3 (Windows), encoding 1 (Unicode BMP), language, name id 1 (family).
+        for v in [3u16, 1, *lang, 1, utf16.len() as u16, strings.len() as u16] {
+            recs.extend(v.to_be_bytes());
+        }
+        strings.extend(utf16);
+    }
+    let mut name = Vec::new();
+    for v in [0u16, records.len() as u16, (6 + recs.len()) as u16] {
+        name.extend(v.to_be_bytes());
+    }
+    name.extend(recs);
+    name.extend(strings);
+    let glyf = vec![0u8; 4];
+    let tables: [(&[u8; 4], &[u8]); 2] = [(b"glyf", &glyf), (b"name", &name)];
+    let mut out: Vec<u8> = Vec::new();
+    for v in [0x0001u16, 0x0000, tables.len() as u16, 32, 1, 0] {
+        out.extend(v.to_be_bytes());
+    }
+    let mut offset = 12 + 16 * tables.len();
+    let mut body = Vec::new();
+    for (tag, data) in tables {
+        out.extend(tag);
+        out.extend(0u32.to_be_bytes());
+        out.extend((offset as u32).to_be_bytes());
+        out.extend((data.len() as u32).to_be_bytes());
+        let padded = data.len().div_ceil(4) * 4;
+        body.extend(data);
+        body.resize(body.len() + padded - data.len(), 0);
+        offset += padded;
+    }
+    out.extend(body);
+    out
 }
 
 #[cfg(test)]

@@ -716,6 +716,10 @@ pub struct Prefs {
     /// ([`cmd::text::restore_fonts`]), at most [`cmd::text::MAX_FONT_SOURCES`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub font_sources: Vec<String>,
+    /// Font folders added with `text.addFontFolder {path}`, indexed again when the app starts
+    /// ([`cmd::text::restore_fonts`]), at most [`figcraft_text::fontdb::MAX_FONT_DIRS`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub font_folders: Vec<String>,
 }
 
 /// Recently run actions kept for the Actions palette (newest first).
@@ -755,6 +759,7 @@ impl Default for Prefs {
             recent_actions: Vec::new(),
             device_sources: Vec::new(),
             font_sources: Vec::new(),
+            font_folders: Vec::new(),
         }
     }
 }

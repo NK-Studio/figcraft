@@ -238,7 +238,9 @@ Or in a project's `.mcp.json`:
   per process: after installing one, `text.rescanFonts` picks it up (`{added: [families]}`), and
   `text.loadFont {path | data (base64), remember?}` adds a font file without installing it (`{families}`);
   a `path` is remembered and loaded again whenever the app starts (`text.fontSources {remove?, clear?}`
-  lists and forgets them).
+  lists and forgets them). `text.addFontFolder {path, remember?}` adds the fonts in a folder and its
+  subfolders the same way (`{families}`; `text.fontFolders {remove?, clear?}`). A family can be named
+  by any of its localized names (`"fontFamily": "나눔고딕"`); the font's own name is stored.
   Text boxes keep the size they were measured at: both refit the open document's auto-sizing text
   in the new families (`refitted: [ids]`), and `text.refit {ids?}` does it for any text, e.g. a
   file saved while its fonts were missing.

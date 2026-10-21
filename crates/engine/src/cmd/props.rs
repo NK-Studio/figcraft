@@ -969,6 +969,8 @@ pub fn apply_text_style(cmd: &str, t: &mut TextData, start: usize, end: usize, k
     match k {
         "fontFamily" => {
             let fam = string_val(v).ok_or_else(|| bad(cmd, "`fontFamily` must be a string"))?;
+            // A localized name (`나눔고딕`) stores the font's own name, as other apps know it.
+            let fam = figcraft_text::family_for_localized(&fam).unwrap_or(fam);
             // Keep the style if the new family has it, else the nearest.
             let styles = figcraft_text::family_styles(&fam);
             t.restyle(start, end, |s| {

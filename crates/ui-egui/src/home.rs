@@ -178,7 +178,8 @@ pub fn show(app: &mut FigApp, ui: &mut Ui) {
 /// editor then shows it), behind an "Opening as a new file" card ([`crate::pending_open`]); anything
 /// else is turned away with a toast. A file that fails to open keeps the engine's own error.
 fn dropped(app: &mut FigApp, ctx: &egui::Context) {
-    let files = ctx.input(|i| i.raw.dropped_files.clone());
+    // Font files and folders load as fonts.
+    let files = crate::font_files::take_dropped(app, ctx.input(|i| i.raw.dropped_files.clone()));
     for f in files {
         let path = f.path().to_path_buf();
         if !crate::opens(&path) {
