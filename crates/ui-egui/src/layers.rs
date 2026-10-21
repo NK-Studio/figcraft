@@ -54,6 +54,7 @@ pub fn node_icon(doc: &Document, id: NodeId) -> Icon {
                 Icon::Rectangle
             }
         }
+        NodeKind::Spine(_) => Icon::Skeleton,
         NodeKind::Ellipse { .. } => Icon::Ellipse,
         NodeKind::Polygon { .. } => Icon::Polygon,
         NodeKind::Star { .. } => Icon::Star,

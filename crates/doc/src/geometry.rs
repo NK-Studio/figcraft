@@ -15,7 +15,7 @@ pub fn shape_path(n: &Node) -> Option<BezPath> {
         | NodeKind::ComponentSet { .. }
         | NodeKind::Instance { .. }
         | NodeKind::Section { .. } => figcraft_geom::rounded_rect(w, h, c.radii, c.smoothing),
-        NodeKind::Slice => figcraft_geom::rounded_rect(w, h, [0.0; 4], 0.0),
+        NodeKind::Slice | NodeKind::Spine(_) => figcraft_geom::rounded_rect(w, h, [0.0; 4], 0.0),
         NodeKind::Ellipse { start, sweep, inner } => figcraft_geom::ellipse(w, h, *start, *sweep, *inner),
         NodeKind::Polygon { count } => figcraft_geom::rounded_polygon(&figcraft_geom::polygon_points(w, h, *count), c.radii[0]),
         NodeKind::Star { count, inner_ratio } => figcraft_geom::rounded_polygon(&figcraft_geom::star_points(w, h, *count, *inner_ratio), c.radii[0]),
@@ -64,7 +64,7 @@ fn hits_node_itself(doc: &Document, id: NodeId, n: &Node, pt: Point, tol: f64, o
     let tol_l = tol;
     match &n.kind {
         NodeKind::Group | NodeKind::BooleanOp { .. } | NodeKind::Page { .. } => false,
-        NodeKind::Text(_) | NodeKind::Slice => n.local_rect().inflate(tol_l, tol_l).contains(lp),
+        NodeKind::Text(_) | NodeKind::Slice | NodeKind::Spine(_) => n.local_rect().inflate(tol_l, tol_l).contains(lp),
         NodeKind::Line => {
             let half = (n.stroke.weight / 2.0).max(tol_l * STROKE_REACH);
             lp.x >= -half && lp.x <= n.width + half && lp.y.abs() <= half

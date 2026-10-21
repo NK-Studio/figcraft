@@ -10,7 +10,7 @@
 //! `branches/<id>/base.json` and `branches/<id>/head.json`; a branch's own version history is
 //! kept like the file's, under `branches/<id>/versions/`. A published file also holds its
 //! library (see [`library`]). Readers that don't know about versions, branches or libraries
-//! ignore those entries. Plain
+//! ignore those entries. Spine skeletons are kept under `spine/` (see [`spine`]). Plain
 //! JSON (the `document.json` alone) also opens. Reading is lenient: structural problems are
 //! repaired (see [`Document::repair`]) and reported, damaged versions and libraries are skipped.
 //!
@@ -20,9 +20,11 @@
 pub mod fig;
 pub mod library;
 pub mod rest;
+pub mod spine;
 pub mod thumbnail;
 
 pub use library::{is_valid_library_id, read_library, read_library_within};
+pub use spine::{add_spine, spine_key};
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Read, Seek, Write};
@@ -391,6 +393,7 @@ pub fn save_bytes_with_history(
         if let Some(t) = thumbnail_png {
             put(&mut z, "thumbnail.png", stored, t)?;
         }
+        spine::write(&mut z, doc)?;
         put_versions(&mut z, "versions", versions)?;
         if !branches.is_empty() {
             let mut ids = BTreeSet::new();
@@ -496,6 +499,7 @@ pub(crate) fn load_within(bytes: &[u8], budget: ImageBudget) -> Result<Loaded, F
     let (mut doc, mut issues, own_images) = parse_json(&text)?;
     let (images, unread) = read_images(&mut z, own_images.as_ref(), budget);
     report_lost_images(&mut issues, &unread, own_images.as_ref(), &images);
+    doc.spine = spine::read(&mut z, &mut issues);
     match library::read(&mut z, &images, u64::MAX) {
         Ok(lib) => doc.published = lib.map(Arc::new),
         Err(e) => issues.push(format!("the published library was skipped: {e}")),
@@ -771,6 +775,8 @@ mod image_budget_tests;
 mod image_tests;
 #[cfg(test)]
 mod large_tests;
+#[cfg(test)]
+mod spine_tests;
 #[cfg(test)]
 mod staging_tests;
 #[cfg(test)]

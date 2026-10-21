@@ -17,6 +17,7 @@ pub mod library;
 pub mod node;
 pub mod props;
 pub mod proto;
+pub mod spine;
 pub mod styles;
 pub mod text;
 pub mod vector;
@@ -31,6 +32,7 @@ pub use handoff::*;
 pub use library::*;
 pub use node::*;
 pub use props::*;
+pub use spine::{SpineAsset, SpineData};
 pub use styles::*;
 pub use text::*;
 pub use vector::*;
@@ -171,6 +173,9 @@ pub struct Document {
     /// Images by content hash; serialized separately by the format crate.
     #[serde(skip)]
     pub images: BTreeMap<String, ImageData>,
+    /// Spine skeletons by key; serialized separately by the format crate.
+    #[serde(skip)]
+    pub spine: BTreeMap<String, SpineAsset>,
     /// The page shown when the file opens.
     #[serde(default)]
     pub current_page: Option<NodeId>,
@@ -244,6 +249,7 @@ impl Document {
             styles: Vec::new(),
             variables: Variables::default(),
             images: BTreeMap::new(),
+            spine: BTreeMap::new(),
             current_page: None,
             document_colors: Vec::new(),
             comments: Vec::new(),

@@ -920,6 +920,10 @@ impl<'d> Exporter<'d> {
             NodeKind::Component { .. } => "SYMBOL",
             NodeKind::Instance { .. } => "INSTANCE",
             NodeKind::Slice => "SLICE",
+            NodeKind::Spine(_) => {
+                self.warn("Spine skeletons were written as empty rectangles");
+                "ROUNDED_RECTANGLE"
+            }
         };
         if !nested {
             f.push(("type", e(ty)));

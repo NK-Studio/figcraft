@@ -37,6 +37,8 @@ icons! {
     Polygon,
     Star,
     Image,
+    /// A Spine skeleton layer.
+    Skeleton,
     Pen,
     Pencil,
     Text,
@@ -525,6 +527,15 @@ fn draw(p: &P, icon: Icon) {
             p.rect(2.5, 3.5, 13.5, 12.5, 1.0);
             p.poly(&[(2.5, 11.5), (6.0, 8.0), (9.0, 11.0), (10.5, 9.5), (13.5, 12.5)], false);
             p.dot(10.5, 6.5, 1.1);
+        }
+        Skeleton => {
+            // An armature: three bones joined at round joints, bending up to the right.
+            p.line(3.5, 12.5, 7.0, 8.5);
+            p.line(7.0, 8.5, 12.5, 7.0);
+            p.line(12.5, 7.0, 10.5, 2.5);
+            p.dot(3.5, 12.5, 1.5);
+            p.dot(7.0, 8.5, 1.3);
+            p.dot(12.5, 7.0, 1.3);
         }
         Pen => {
             p.poly(&[(8.0, 2.0), (12.5, 8.5), (10.5, 13.5), (5.5, 13.5), (3.5, 8.5)], true);

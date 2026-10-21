@@ -123,6 +123,8 @@ pub enum NodeKind {
         props: BTreeMap<String, serde_json::Value>,
     },
     Slice,
+    /// A Spine skeleton (`docs/spine.md`).
+    Spine(crate::SpineData),
 }
 
 fn page_bg() -> Color {
@@ -302,6 +304,7 @@ impl NodeKind {
             NodeKind::ComponentSet { .. } => "COMPONENT_SET",
             NodeKind::Instance { .. } => "INSTANCE",
             NodeKind::Slice => "SLICE",
+            NodeKind::Spine(_) => "SPINE",
         }
     }
 
@@ -324,6 +327,7 @@ impl NodeKind {
             NodeKind::ComponentSet { .. } => "Component set",
             NodeKind::Instance { .. } => "Instance",
             NodeKind::Slice => "Slice",
+            NodeKind::Spine(_) => "Spine",
         }
     }
 
