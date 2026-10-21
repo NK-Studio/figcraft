@@ -28,8 +28,14 @@ pub fn begin(s: &mut Session, id: NodeId, caret: Option<usize>, created: bool) -
     Ok(())
 }
 
-/// Finish editing: an empty new text layer is removed; the session becomes one undo step.
+/// Finish editing: a composition in progress is kept (as the system's text fields do: the last
+/// Hangul syllable typed stays), an empty new text layer is removed; the session becomes one undo
+/// step.
 pub fn end(s: &mut Session) -> Result<()> {
+    if s.ds()?.text_edit.is_none() {
+        return Ok(());
+    }
+    commit_preedit(s)?;
     let Some(te) = s.ds()?.text_edit.clone() else { return Ok(()) };
     s.ds_mut()?.text_edit = None;
     let empty = text_of(s, te.id).map(|t| t.characters.trim().is_empty()).unwrap_or(false);
@@ -319,9 +325,26 @@ pub fn key(s: &mut Session, key: &str, shift: bool, word: bool, line: bool) -> R
     select(s, anchor, next)
 }
 
-/// Set the selection (`anchor`..`caret`, clamped to the text). Moving the caret abandons any
-/// composition in progress.
+/// Insert the composition in progress as typed text (the IME didn't commit it: editing ends, or the
+/// caret moves). Returns where it went and its length in chars.
+fn commit_preedit(s: &mut Session) -> Result<Option<(usize, usize)>> {
+    let Some(te) = s.ds()?.text_edit.clone() else { return Ok(None) };
+    let Some(p) = te.preedit else { return Ok(None) };
+    let at = te.caret.min(te.anchor);
+    insert(s, &p.text)?;
+    Ok(Some((at, p.text.chars().count())))
+}
+
+/// Set the selection (`anchor`..`caret`, clamped to the text). A composition in progress is
+/// committed first; positions from its insertion point on move past it.
 fn select(s: &mut Session, anchor: usize, caret: usize) -> Result<()> {
+    let (anchor, caret) = match commit_preedit(s)? {
+        Some((at, n)) => {
+            let shift = |i: usize| if i >= at { i.saturating_add(n) } else { i };
+            (shift(anchor), shift(caret))
+        }
+        None => (anchor, caret),
+    };
     let Some(id) = s.ds()?.text_edit.as_ref().map(|te| te.id) else { return Ok(()) };
     let len = s.doc()?.node(id).and_then(|n| n.kind.text()).map_or(0, TextData::char_count);
     let ds = s.ds_mut()?;
@@ -718,18 +741,25 @@ mod tests {
         assert!(preedit_state(&s).is_none());
         assert_eq!(data(&s, id).characters, "Hello日本 world");
         assert_eq!(sel(&s), (7, 7));
-        // Composing over a selection replaces it; moving the caret abandons the composition.
+        // Composing over a selection replaces it; moving the caret commits the composition.
         set_caret(&mut s, 7, false).unwrap();
         set_caret(&mut s, 13, true).unwrap();
         preedit(&mut s, "x", None).unwrap();
         assert_eq!(data(&s, id).characters, "Hello日本");
         set_caret(&mut s, 0, false).unwrap();
         assert!(preedit_state(&s).is_none());
-        assert_eq!(data(&s, id).characters, "Hello日本");
-        // Ending the edit drops an uncommitted composition; the session stays one undo step.
+        assert_eq!(data(&s, id).characters, "Hello日本x");
+        assert_eq!(sel(&s), (0, 0));
+        // A caret placed at or after the composition lands after it.
+        set_caret(&mut s, 8, false).unwrap();
+        preedit(&mut s, "요", None).unwrap();
+        set_caret(&mut s, 8, false).unwrap();
+        assert_eq!((data(&s, id).characters.as_str(), sel(&s)), ("Hello日本x요", (9, 9)));
+        // Ending the edit keeps an uncommitted composition (the last Hangul syllable typed); the
+        // session stays one undo step.
         preedit(&mut s, "zz", None).unwrap();
         end(&mut s).unwrap();
-        assert_eq!(data(&s, id).characters, "Hello日本");
+        assert_eq!(data(&s, id).characters, "Hello日本x요zz");
         assert_eq!(s.ds().unwrap().history.undo.len(), undo_before + 1);
         // Not editing: an error, not a crash.
         assert!(preedit(&mut s, "a", None).is_err());
