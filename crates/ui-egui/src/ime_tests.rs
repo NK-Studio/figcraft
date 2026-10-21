@@ -85,3 +85,31 @@ fn pinyin_composes_inline_and_commits_once_with_the_ime_on_every_frame() {
     ime(&mut u, vec![key(Key::Enter, true), key(Key::Enter, false), Event::Text("!".into())]);
     assert_eq!(text(&u, t), "Hi你好\n!");
 }
+
+/// Korean on macOS: typing 군고구마 and clicking away while 마 is still composing keeps 마 (the editor
+/// commits it), and the IME's own commit of that 마 with the next key, in the next text box, is
+/// not typed a second time. A 마 typed afresh still is.
+#[test]
+fn a_composition_committed_on_ending_the_edit_is_not_typed_again() {
+    let mut s = Session::new();
+    let a = NodeId(s.execute("text.create", &json!({"text": "", "x": 40, "y": 40})).unwrap()["id"].as_u64().unwrap());
+    let b = NodeId(s.execute("text.create", &json!({"text": "", "x": 40, "y": 200})).unwrap()["id"].as_u64().unwrap());
+    let mut u = Ui::new(s);
+    figcraft_engine::textedit::begin(&mut u.app.session, a, Some(0), false).unwrap();
+    ime(&mut u, vec![preedit("구"), Event::Ime(ImeEvent::Commit("군고구".into())), preedit("ㅁ")]);
+    ime(&mut u, vec![preedit("마")]);
+    // A click elsewhere ends the edit with 마 still composing; the IME says nothing.
+    figcraft_engine::textedit::end(&mut u.app.session).unwrap();
+    u.frame_raw(RawInput::default());
+    assert_eq!(text(&u, a), "군고구마");
+    // The next text box: the first key makes the IME commit what it held, then compose anew.
+    figcraft_engine::textedit::begin(&mut u.app.session, b, Some(0), false).unwrap();
+    ime(&mut u, vec![preedit(""), Event::Ime(ImeEvent::Commit("마".into())), preedit("ㄱ")]);
+    ime(&mut u, vec![preedit(""), Event::Ime(ImeEvent::Commit("감".into()))]);
+    assert_eq!(text(&u, b), "감", "the held 마 isn't typed again");
+    // 마 typed in the box afterwards is the user's.
+    ime(&mut u, vec![preedit("ㅁ")]);
+    ime(&mut u, vec![preedit("마")]);
+    ime(&mut u, vec![preedit(""), Event::Ime(ImeEvent::Commit("마".into()))]);
+    assert_eq!(text(&u, b), "감마");
+}

@@ -96,18 +96,67 @@ fn cached_tip(label: &'static str, key: Option<&'static str>) -> &'static str {
 /// began.
 /// `swallowed`: what this frame's Cmd/Ctrl+V chords the shell swallowed ask for ([`swallowed_paste`]).
 pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool, swallowed: Swallowed) {
+    let before = app.ui.ime_preedit.take();
+    handle_input(app, ctx, typing, swallowed);
+    // A composition that went away with no word from the IME (editing ended, or a click moved the
+    // caret) was committed by the editor; macOS's Korean IME still holds it and commits it again
+    // with the next key, into the next text typed.
+    let now = composition(app);
+    let from_ime = ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Ime(_))));
+    if before.is_some() && now.is_none() && !from_ime {
+        app.ui.ime_leftover = before;
+    }
+    app.ui.ime_preedit = now;
+}
+
+/// The IME composition being shown, if editing text.
+fn composition(app: &FigApp) -> Option<String> {
+    app.session.ds().ok()?.text_edit.as_ref()?.preedit.as_ref().map(|p| p.text.clone())
+}
+
+/// Whether the IME's commit `t` repeats the composition the editor already committed (it goes);
+/// anything else typed or composed means the IME has let it go.
+fn leftover_commit(app: &mut FigApp, ev: &Event) -> bool {
+    let Some(left) = &app.ui.ime_leftover else { return false };
+    match ev {
+        Event::Ime(egui::ImeEvent::Commit(t)) => {
+            let repeat = t == left;
+            app.ui.ime_leftover = None;
+            repeat
+        }
+        Event::Ime(egui::ImeEvent::Preedit { text, .. }) if !text.is_empty() => {
+            app.ui.ime_leftover = None;
+            false
+        }
+        Event::Text(_) => {
+            app.ui.ime_leftover = None;
+            false
+        }
+        _ => false,
+    }
+}
+
+fn handle_input(app: &mut FigApp, ctx: &Context, typing: bool, swallowed: Swallowed) {
     note_platform(ctx);
     // Text fields in panels own the keyboard (also the key that ends their editing).
+    let events: Vec<Event> = ctx.input(|i| i.events.clone());
     if typing || crate::a11y::field_focused(ctx) || app.ui.palette.is_some() {
+        // The IME's repeat of a leftover composition doesn't belong in a panel's field either,
+        // but egui has already given it to the field: only forget it here.
+        for ev in &events {
+            leftover_commit(app, ev);
+        }
         return;
     }
-    let events: Vec<Event> = ctx.input(|i| i.events.clone());
     // Every frame while editing, even one without input: a frame without the IME output turns the
     // platform's IME off, which drops the composition (macOS then types plain letters).
     let editing = app.session.ds().map(|d| d.text_edit.is_some()).unwrap_or(false);
     if editing {
         text_keys(app, ctx, &events);
         return;
+    }
+    for ev in &events {
+        leftover_commit(app, ev);
     }
     if events.is_empty() {
         return;
@@ -431,6 +480,9 @@ fn text_keys(app: &mut FigApp, ctx: &Context, events: &[Event]) {
     // A key that ran a shortcut swallows the text it also produced (Alt+. types "≥" on macOS).
     let mut skip_text = false;
     for ev in events {
+        if leftover_commit(app, ev) {
+            continue;
+        }
         match ev {
             Event::Text(t) | Event::Ime(egui::ImeEvent::Commit(t)) => {
                 if skip_text && matches!(ev, Event::Text(_)) {

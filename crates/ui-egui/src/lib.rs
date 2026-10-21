@@ -590,6 +590,11 @@ pub struct UiState {
     /// Files the user opened whose fonts are yet to be checked (by document uid).
     pub font_checks: Vec<u64>,
     pub missing_fonts: Option<missing_fonts::Shown>,
+    /// The IME composition shown at the end of the last frame.
+    pub ime_preedit: Option<String>,
+    /// A composition the editor committed itself when editing ended, which the platform's IME may
+    /// still hold and commit again with the next key ([`shortcuts::handle`] drops that repeat).
+    pub ime_leftover: Option<String>,
     pub screenshot_requests: Vec<(u64, String)>,
     pub frame_ms: f64,
     pub render_ms: f64,
@@ -724,6 +729,8 @@ impl Default for UiState {
             import_report: None,
             font_checks: Vec::new(),
             missing_fonts: None,
+            ime_preedit: None,
+            ime_leftover: None,
             screenshot_requests: Vec::new(),
             frame_ms: 0.0,
             render_ms: 0.0,
