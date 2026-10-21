@@ -809,8 +809,10 @@ pub type Done = Box<dyn FnOnce(&mut FigApp, &egui::Context, Value)>;
 
 impl FigApp {
     pub fn new(mut session: Session, services: Box<dyn Services>) -> Self {
-        // Device folders imported before come back (`docs/device-profiles.md`).
+        // Device folders imported before come back (`docs/device-profiles.md`), and font files
+        // loaded before (text in their families draws with them, not a fallback).
         figcraft_engine::cmd::device::restore_devices(&mut session);
+        figcraft_engine::cmd::text::restore_fonts(&session);
         // The main window's panels open as wide as they were left.
         let (left_width, right_width) = session.prefs.panel_widths;
         let pages_height = session.prefs.pages_height;

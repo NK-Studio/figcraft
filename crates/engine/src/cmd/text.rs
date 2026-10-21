@@ -495,16 +495,19 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "text.loadFont",
             "Load font file",
-            "{path | data (base64)}  adds a font file (.ttf, .otf, .ttc, .otc; every face of a collection) to this session's fonts without installing it; the open document's auto-sizing text in its families fits it (text.refit) → {families, refitted: [ids]}",
+            "{path | data (base64), remember? (default true: a `path` is loaded again whenever the app starts; see text.fontSources)}  adds a font file (.ttf, .otf, .ttc, .otc; every face of a collection) to the app's fonts without installing it; the open document's auto-sizing text in its families fits it (text.refit) → {families, refitted: [ids]}",
             true,
             |s, p| {
                 let cmd = "text.loadFont";
+                let mut source = None;
                 let bytes = if let Some(b64) = string(p, "data") {
                     use base64::Engine as _;
                     let b64 = b64.split_once(',').map(|(_, d)| d.to_string()).unwrap_or(b64);
                     base64::engine::general_purpose::STANDARD.decode(b64.trim()).map_err(|e| bad(cmd, format!("`data`: {e}")))?
                 } else if let Some(path) = string(p, "path") {
-                    super::file::read_capped(&path, figcraft_text::fontdb::MAX_FONT_FILE)?
+                    let bytes = super::file::read_capped(&path, figcraft_text::fontdb::MAX_FONT_FILE)?;
+                    source = Some(path);
+                    bytes
                 } else {
                     return Err(bad(cmd, "pass `path` or `data` (base64)"));
                 };
@@ -512,9 +515,57 @@ pub fn specs() -> Vec<CommandSpec> {
                 if families.is_empty() {
                     return Err(bad(cmd, "not a font file"));
                 }
+                if let Some(path) = source.filter(|_| boolean(p, "remember") != Some(false)) {
+                    remember_font(s, &path);
+                }
                 let refitted = crate::fonts::refit_open(s, None, Some(&families));
                 Ok(json!({"families": families, "refitted": refitted}))
             }
         ),
+        spec!(
+            "text.fontSources",
+            "Remembered font files",
+            "{remove? (a path), clear? (forget them all)}  the font files text.loadFont remembers, loaded again whenever the app starts (fonts already loaded stay until it quits) → {sources}",
+            false,
+            |s, p| {
+                if boolean(p, "clear") == Some(true) {
+                    s.prefs.font_sources.clear();
+                } else if let Some(path) = string(p, "remove") {
+                    let abs = absolute(&path);
+                    s.prefs.font_sources.retain(|q| *q != abs && *q != path);
+                }
+                Ok(json!({"sources": s.prefs.font_sources}))
+            }
+        ),
     ]
+}
+
+/// Font files remembered by `text.loadFont`, at most this many (the oldest go first).
+pub const MAX_FONT_SOURCES: usize = 64;
+
+fn absolute(path: &str) -> String {
+    std::path::absolute(path).map_or_else(|_| path.to_string(), |p| p.to_string_lossy().into_owned())
+}
+
+/// Keep `path` (made absolute) in the preferences' font sources, newest last.
+fn remember_font(s: &mut Session, path: &str) {
+    let p = absolute(path);
+    let sources = &mut s.prefs.font_sources;
+    sources.retain(|q| *q != p);
+    sources.push(p);
+    let over = sources.len().saturating_sub(MAX_FONT_SOURCES);
+    sources.drain(..over);
+}
+
+/// Load the font files the preferences remember (at start-up, so text in their families draws
+/// with them from the first frame); ones that are gone or unreadable are skipped quietly. Returns
+/// the families loaded.
+pub fn restore_fonts(s: &Session) -> Vec<String> {
+    let mut families = Vec::new();
+    for src in s.prefs.font_sources.iter().take(MAX_FONT_SOURCES) {
+        if let Ok(bytes) = super::file::read_capped(src, figcraft_text::fontdb::MAX_FONT_FILE) {
+            families.extend(figcraft_text::load_font_bytes(bytes));
+        }
+    }
+    families
 }

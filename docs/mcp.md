@@ -236,7 +236,9 @@ Or in a project's `.mcp.json`:
   `text.missingFonts` lists the families the document names that aren't installed
   (`{families: [{family, layers}]}`); their text draws in a fallback font. Fonts are indexed once
   per process: after installing one, `text.rescanFonts` picks it up (`{added: [families]}`), and
-  `text.loadFont {path | data (base64)}` adds a font file without installing it (`{families}`).
+  `text.loadFont {path | data (base64), remember?}` adds a font file without installing it (`{families}`);
+  a `path` is remembered and loaded again whenever the app starts (`text.fontSources {remove?, clear?}`
+  lists and forgets them).
   Text boxes keep the size they were measured at: both refit the open document's auto-sizing text
   in the new families (`refitted: [ids]`), and `text.refit {ids?}` does it for any text, e.g. a
   file saved while its fonts were missing.

@@ -213,3 +213,37 @@ fn fonts_load_from_files_and_rescans_report_new_families() {
     let r = s.execute("text.rescanFonts", &json!({})).unwrap();
     assert!(r["added"].is_array());
 }
+
+/// `text.loadFont {path}` remembers the file, which comes back at start-up (`restore_fonts`);
+/// `text.fontSources` lists and forgets them.
+#[test]
+fn loaded_font_files_come_back_at_start_up() {
+    let mut s = Session::new();
+    assert!(s.execute("text.loadFont", &json!({"path": "no-such-dir/x.ttf"})).is_err());
+    assert!(s.prefs.font_sources.is_empty(), "a failed load isn't remembered");
+    let Some(f) = figcraft_text::CRAFT_FONTS.first() else { return };
+    let dir = std::env::temp_dir().join(format!("figcraft-font-sources-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("Game.ttf");
+    std::fs::write(&file, f.bytes).unwrap();
+    let path = file.to_string_lossy().into_owned();
+    let r = s.execute("text.loadFont", &json!({"path": path})).unwrap();
+    let families = r["families"].clone();
+    s.execute("text.loadFont", &json!({"path": path})).unwrap();
+    assert_eq!(s.prefs.font_sources.len(), 1, "remembered once");
+    let mut next = Session::new();
+    next.prefs = s.prefs.clone();
+    assert_eq!(json!(crate::cmd::text::restore_fonts(&next)), families);
+    // Not remembered when asked; listed, removed and cleared through text.fontSources.
+    let other = dir.join("Other.ttf");
+    std::fs::write(&other, f.bytes).unwrap();
+    s.execute("text.loadFont", &json!({"path": other.to_string_lossy(), "remember": false})).unwrap();
+    assert_eq!(s.execute("text.fontSources", &json!({})).unwrap()["sources"].as_array().map(Vec::len), Some(1));
+    assert_eq!(s.execute("text.fontSources", &json!({"remove": path})).unwrap()["sources"], json!([]));
+    s.execute("text.loadFont", &json!({"path": path})).unwrap();
+    assert_eq!(s.execute("text.fontSources", &json!({"clear": true})).unwrap()["sources"], json!([]));
+    // A gone file is skipped quietly.
+    let _ = std::fs::remove_dir_all(&dir);
+    assert!(crate::cmd::text::restore_fonts(&next).is_empty());
+}

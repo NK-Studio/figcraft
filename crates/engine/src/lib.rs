@@ -712,6 +712,10 @@ pub struct Prefs {
     /// starts ([`cmd::device::restore_devices`]), at most [`cmd::device::MAX_SOURCES`].
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub device_sources: Vec<String>,
+    /// Font files loaded with `text.loadFont {path}`, loaded again when the app starts
+    /// ([`cmd::text::restore_fonts`]), at most [`cmd::text::MAX_FONT_SOURCES`].
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub font_sources: Vec<String>,
 }
 
 /// Recently run actions kept for the Actions palette (newest first).
@@ -750,6 +754,7 @@ impl Default for Prefs {
             view: BTreeMap::new(),
             recent_actions: Vec::new(),
             device_sources: Vec::new(),
+            font_sources: Vec::new(),
         }
     }
 }
