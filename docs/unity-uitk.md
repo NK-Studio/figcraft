@@ -318,6 +318,43 @@ the same way before their constraints place them on the new safe area.
 The ArrowsAndCats card show (Unity 6.0, 1080 × 1920 Expand) imported this way keeps its layout from
 iPhone 12 mini to iPhone 13 Pro Max.
 
+## FigCraft Unity package (planned)
+
+**Principle: nothing that only works at run time.** Everything an export needs must show in the
+Editor without pressing Play — the Game view, the Device Simulator when the device changes, and the
+UI Builder where it can — and behave the same at run time. The scripts exported so far
+(`FigcraftPanelScale`, `FigcraftSafeArea`) break that: they run in `Update()` (Play only), and the
+panel scale script writes into the PanelSettings asset, whose stale value then stays in edit mode.
+
+The Unity side becomes a UPM package, **`com.nkstudio.figcraft`** (its own repository, not this
+Rust repo), replacing the generated scripts:
+
+| Need | How (works in edit mode, Simulator, run time) |
+|---|---|
+| UI scaling per frame | Native settings, no script: the frame's scaling (Constant Pixel Size / Scale With Screen Size / Constant Physical Size, reference resolution, Match / Expand / Shrink) written into the **PanelSettings asset** (UI Toolkit) or **CanvasScaler** (uGUI) by the package's editor importer from a settings file in the export |
+| Safe area | `<fc:SafeArea>`, a custom `VisualElement` (`[UxmlElement]`) reading `Screen.safeArea` |
+| `gap` before 6.7 | `<fc:Flex gap="…">`: spaces its visible children (wrap, reverse, children added, removed or hidden); native `gap` on 6.7+; a migration tool turns it into a plain element with `gap` |
+| `z-index` before 6.7, gradients before 6.7, `aspect-ratio` before 6.3 | custom elements of the same kind (child order; `generateVisualContent` meshes; size after layout) instead of baked images |
+| Shows the export | `PanelRenderer` from 6.5, `UIDocument` before |
+
+FigCraft's exporter then chooses per feature: native (the target version has it) → package element →
+baked image, and `unity.check` names the package version a file needs.
+
+**Phase 0 findings** (Unity 6000.6.0f1, edit mode, the card show on a PanelRenderer):
+- Code running inside a panel reads the **simulated** screen and safe area through the public API
+  (`Screen.width/height`, `Screen.safeArea`) in edit mode, and they follow Device Simulator device
+  changes (iPhone 12 mini 1080×2338, safe y 97; iPad Mini 4 1536×2048, none; iPhone X 1125×2436,
+  safe y 102). `<fc:SafeArea>` can use the public API only.
+- The panel resizes in edit mode when the device changes, and native **Scale With Screen Size**
+  (reference 375×812, Expand) gives iPhone 12 mini a 375×812 panel with no script.
+- `PanelSettings.scale` multiplies every mode: a value left by a run-time script (4.096) shrank the
+  panel to 91.6 pt wide. Exports set it to 1.
+- The Device Simulator can only be switched through internal API (`SimulatorWindow.main.deviceIndex`):
+  fine for the test harness, never for the package.
+- Open: on iPad Mini 4 and iPhone X the panel size didn't match Scale With Screen Size worked out
+  from the simulated screen (375×812 and 609×812 where 609×812 and 375×812 were expected); to pin
+  down in the edit-mode harness (orientation, render target).
+
 ## Phases
 
 - **U1 — mapping spec + compatibility check** (landed): this doc, `crates/uitk` (versions, rules),
