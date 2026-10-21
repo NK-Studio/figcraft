@@ -64,6 +64,7 @@ pub mod theme;
 pub mod toolbar;
 pub mod typography;
 pub mod ui_scale;
+pub mod spine_panel;
 pub mod unity_panel;
 pub mod variable_ui;
 pub mod variables_panel;

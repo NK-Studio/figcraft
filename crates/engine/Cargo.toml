@@ -24,6 +24,7 @@ craft-docpath = { workspace = true }
 figcraft-plugin = { workspace = true }
 figcraft-device = { workspace = true }
 figcraft-uitk = { workspace = true }
+figcraft-spine = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }

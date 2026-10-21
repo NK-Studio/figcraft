@@ -421,6 +421,9 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
         grids(app, ui, &doc, &sel);
         widgets::separator(ui);
     }
+    if crate::spine_panel::section(app, ui, &doc, &sel) {
+        widgets::separator(ui);
+    }
     crate::unity_panel::layer_section(app, ui, &doc, &sel);
     widgets::separator(ui);
     crate::export_panel::section(app, ui, &doc, &sel);

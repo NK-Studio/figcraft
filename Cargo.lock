@@ -1543,6 +1543,7 @@ dependencies = [
  "figcraft-pdf",
  "figcraft-plugin",
  "figcraft-render",
+ "figcraft-spine",
  "figcraft-svg",
  "figcraft-text",
  "figcraft-uitk",

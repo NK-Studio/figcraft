@@ -483,6 +483,20 @@ fn file_stem(path: &str) -> String {
     std::path::Path::new(path).file_stem().and_then(|e| e.to_str()).unwrap_or("Untitled").to_string()
 }
 
+/// A Spine skeleton (or its atlas) imported: placed with `spine.place` from its path, so the
+/// atlas and its pages beside it come too.
+fn import_spine(s: &mut Session, path: Option<&str>, x: Option<f64>, y: Option<f64>) -> Result<Value> {
+    let Some(path) = path else {
+        return Err(bad("file.import", "a Spine skeleton needs its atlas and pages: import it by `path`, or use spine.place"));
+    };
+    let mut q = json!({"path": path});
+    if let (Some(x), Some(y)) = (x, y) {
+        q["x"] = json!(x);
+        q["y"] = json!(y);
+    }
+    crate::cmd::spine::place(s, &q)
+}
+
 /// The counts the import report shows for a freshly loaded document.
 fn import_summary(doc: &Document) -> Value {
     json!({"name": doc.name, "pages": doc.pages.len(), "layers": doc.nodes().filter(|n| !n.is_page()).count(), "images": doc.images.len()})
@@ -1286,6 +1300,8 @@ fn import(s: &mut Session, p: &Value) -> Result<Value> {
             }
             Ok(out)
         }
+        "skel" | "atlas" => import_spine(s, path.as_deref(), x, y),
+        "json" if figcraft_spine::is_skeleton_json(&bytes) => import_spine(s, path.as_deref(), x, y),
         "figcraft" | "json" | "fig" => {
             let resolver = path.as_deref().map(rest_images);
             let images: figcraft_format::rest::ImageResolver = match &resolver {

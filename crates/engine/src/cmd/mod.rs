@@ -19,6 +19,9 @@ pub mod section;
 pub mod structure;
 pub mod styles;
 pub mod text;
+pub mod spine;
+#[cfg(test)]
+mod spine_tests;
 pub mod unity;
 pub mod variables;
 pub mod variables_io;
@@ -93,6 +96,7 @@ fn registry() -> &'static Registry {
         list.extend(proto_actions::specs());
         list.extend(device::specs());
         list.extend(unity::specs());
+        list.extend(spine::specs());
         list.extend(comment::specs());
         list.extend(crate::vectoredit::specs());
         list.extend(crate::shapebuilder::specs());
