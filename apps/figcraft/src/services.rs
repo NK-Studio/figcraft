@@ -324,6 +324,13 @@ impl Services for Desktop {
     fn reduce_motion(&self) -> bool {
         self.reduce_motion.load(Ordering::Relaxed)
     }
+    #[cfg(target_os = "macos")]
+    fn discard_ime_composition(&mut self) {
+        // The UI runs on the main thread; elsewhere there is no input context to reach.
+        if let Some(ctx) = objc2::MainThreadMarker::new().and_then(objc2_app_kit::NSTextInputContext::currentInputContext) {
+            ctx.discardMarkedText();
+        }
+    }
     fn gamepad_held(&mut self) -> u32 {
         crate::gamepad::held()
     }

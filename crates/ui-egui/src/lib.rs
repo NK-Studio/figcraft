@@ -287,6 +287,9 @@ pub trait Services {
     /// Show the file at `path` in the platform's file manager (Finder, Explorer), selected where the
     /// platform can.
     fn reveal_path(&mut self, _path: &std::path::Path) {}
+    /// Make the platform's IME forget the composition it holds: the editor committed it itself when
+    /// editing ended (macOS's Korean IME otherwise goes on composing it in the next text typed).
+    fn discard_ime_composition(&mut self) {}
     /// The system asks for reduced motion (its accessibility setting).
     fn reduce_motion(&self) -> bool {
         false

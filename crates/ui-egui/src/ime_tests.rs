@@ -86,6 +86,15 @@ fn pinyin_composes_inline_and_commits_once_with_the_ime_on_every_frame() {
     assert_eq!(text(&u, t), "Hi你好\n!");
 }
 
+/// Counts the requests to drop the platform IME's composition.
+struct Discards(std::rc::Rc<std::cell::Cell<u32>>);
+
+impl crate::Services for Discards {
+    fn discard_ime_composition(&mut self) {
+        self.0.set(self.0.get() + 1);
+    }
+}
+
 /// Korean on macOS: typing 군고구마 and clicking away while 마 is still composing keeps 마 (the editor
 /// commits it), and the IME's own commit of that 마 with the next key, in the next text box, is
 /// not typed a second time. A 마 typed afresh still is.
@@ -95,13 +104,17 @@ fn a_composition_committed_on_ending_the_edit_is_not_typed_again() {
     let a = NodeId(s.execute("text.create", &json!({"text": "", "x": 40, "y": 40})).unwrap()["id"].as_u64().unwrap());
     let b = NodeId(s.execute("text.create", &json!({"text": "", "x": 40, "y": 200})).unwrap()["id"].as_u64().unwrap());
     let mut u = Ui::new(s);
+    let discards = std::rc::Rc::new(std::cell::Cell::new(0));
+    u.app.services = Box::new(Discards(discards.clone()));
     figcraft_engine::textedit::begin(&mut u.app.session, a, Some(0), false).unwrap();
     ime(&mut u, vec![preedit("구"), Event::Ime(ImeEvent::Commit("군고구".into())), preedit("ㅁ")]);
     ime(&mut u, vec![preedit("마")]);
-    // A click elsewhere ends the edit with 마 still composing; the IME says nothing.
+    // A click elsewhere ends the edit with 마 still composing; the IME says nothing. The platform's
+    // IME is told to drop it (macOS's Korean IME would otherwise go on composing it).
     figcraft_engine::textedit::end(&mut u.app.session).unwrap();
     u.frame_raw(RawInput::default());
     assert_eq!(text(&u, a), "군고구마");
+    assert_eq!(discards.get(), 1);
     // The next text box: the first key makes the IME commit what it held, then compose anew.
     figcraft_engine::textedit::begin(&mut u.app.session, b, Some(0), false).unwrap();
     ime(&mut u, vec![preedit(""), Event::Ime(ImeEvent::Commit("마".into())), preedit("ㄱ")]);
@@ -112,4 +125,6 @@ fn a_composition_committed_on_ending_the_edit_is_not_typed_again() {
     ime(&mut u, vec![preedit("마")]);
     ime(&mut u, vec![preedit(""), Event::Ime(ImeEvent::Commit("마".into()))]);
     assert_eq!(text(&u, b), "감마");
+    // A composition the IME commits itself, or Escape cancels, needs no discarding.
+    assert_eq!(discards.get(), 1);
 }

@@ -37,6 +37,10 @@ windows = { version = "0.62", default-features = false, features = ["UI_ViewMana
 # unsafe, which the workspace forbids). Pinned exactly: review the diff before bumping.
 [target.'cfg(target_os = "macos")'.dependencies]
 fmv-macos-events = "=0.1.0"
+# Telling the system IME to drop a composition the editor already committed (safe AppKit calls;
+# the same versions winit uses).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSTextInputContext"] }
 
 [dev-dependencies]
 wat = { workspace = true }

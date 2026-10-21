@@ -105,6 +105,7 @@ pub fn handle(app: &mut FigApp, ctx: &Context, typing: bool, swallowed: Swallowe
     let from_ime = ctx.input(|i| i.events.iter().any(|e| matches!(e, Event::Ime(_))));
     if before.is_some() && now.is_none() && !from_ime {
         app.ui.ime_leftover = before;
+        app.services.discard_ime_composition();
     }
     app.ui.ime_preedit = now;
 }
