@@ -4,6 +4,10 @@
 #   $DIST/figcraft-<version>-macos-<arch>.dmg          FigCraft.app on a drag-to-Applications DMG
 #   $DIST/figcraft-cli-<version>-macos-<arch>.zip      the headless CLI (when apps/figcraft-cli exists)
 #
+# Both carry the Spine hosts (figcraft-spine-host-4.2/-4.3, docs/spine.md) when the spine-runtimes
+# checkouts are there (SPINE_RUNTIMES_DIR, default ../spine-runtimes; `cargo xtask spine-host
+# --fetch` makes them); without them Spine 4.2 files won't open in the build (a warning here).
+#
 # Usage: packaging/macos/package.sh [--arch universal|aarch64|x86_64] [--skip-build]
 #
 # Signing (env):
@@ -23,14 +27,14 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --arch) ARCH="$2"; shift 2 ;;
     --skip-build) SKIP_BUILD=1; shift ;;
-    -h | --help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,20p' "$0"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
 done
 case "$ARCH" in
-  universal) TARGETS=(aarch64-apple-darwin x86_64-apple-darwin) ;;
-  aarch64) TARGETS=(aarch64-apple-darwin) ;;
-  x86_64) TARGETS=(x86_64-apple-darwin) ;;
+  universal) TARGETS=(aarch64-apple-darwin x86_64-apple-darwin); OSX_ARCHS="arm64;x86_64" ;;
+  aarch64) TARGETS=(aarch64-apple-darwin); OSX_ARCHS="arm64" ;;
+  x86_64) TARGETS=(x86_64-apple-darwin); OSX_ARCHS="x86_64" ;;
   *) echo "unknown --arch $ARCH" >&2; exit 2 ;;
 esac
 
@@ -69,6 +73,31 @@ for bin in "${BINS[@]}"; do
   lipo -create -output "$WORK/bin/$bin" "${inputs[@]}"
   lipo -info "$WORK/bin/$bin"
 done
+
+# ---- Spine hosts -------------------------------------------------------------------------------
+# The official spine-cpp in processes of their own (tools/spine-host), built for the same
+# architectures and deployment target as the app. They and the Spine Runtimes License they are
+# redistributed under ship beside the executables.
+SPINE_HOSTS="$WORK/spine-host"
+SPINE_RUNTIMES="${SPINE_RUNTIMES_DIR:-$ROOT/../spine-runtimes}"
+HOST_BINS=()
+if [ -d "$SPINE_RUNTIMES" ]; then
+  (cd "$ROOT" && CMAKE_OSX_ARCHITECTURES="$OSX_ARCHS" cargo xtask spine-host --out "$SPINE_HOSTS" --tag "macos-$ARCH")
+  for h in "$SPINE_HOSTS"/figcraft-spine-host-*; do
+    [ -f "$h" ] || continue
+    lipo -info "$h"
+    HOST_BINS+=("$(basename "$h")")
+  done
+else
+  warn "macOS: no spine-runtimes in $SPINE_RUNTIMES: packaged without the Spine hosts (Spine 4.2 files won't open)"
+fi
+
+# Copy the Spine hosts and their licence into folder $1.
+copy_spine_hosts() {
+  local h
+  for h in ${HOST_BINS[@]+"${HOST_BINS[@]}"}; do cp "$SPINE_HOSTS/$h" "$1/"; done
+  if [ ${#HOST_BINS[@]} -gt 0 ]; then cp "$SPINE_HOSTS/LICENSE-spine-runtimes.txt" "$2/"; fi
+}
 
 # ---- signing helpers ---------------------------------------------------------------------------
 sign() {
@@ -115,6 +144,9 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 # Executable and icon carry the display name (CFBundleExecutable / CFBundleIconFile).
 cp "$WORK/bin/figcraft" "$APP/Contents/MacOS/FigCraft"
 cp "$WORK/FigCraft.icns" "$APP/Contents/Resources/FigCraft.icns"
+# The Spine hosts beside the executable, where the app looks for them.
+mkdir -p "$APP/Contents/Resources/Licenses"
+copy_spine_hosts "$APP/Contents/MacOS" "$APP/Contents/Resources/Licenses"
 # Licences of the embedded craft-fonts fonts (only when built with CRAFT_FONTS_DIR).
 if [ -n "${CRAFT_FONTS_DIR:-}" ]; then
   mkdir -p "$APP/Contents/Resources/Licenses"
@@ -127,7 +159,11 @@ plutil -lint "$APP/Contents/Info.plist"
 printf 'APPL????' >"$APP/Contents/PkgInfo"
 
 # Sign inside-out: nested code first, then the bundle itself (no --deep on the final signature).
-# Today the only nested code is the main executable; frameworks/helpers would be signed here too.
+# Nested code: the Spine hosts (helper executables, hardened runtime, no entitlements) and the main
+# executable.
+for h in ${HOST_BINS[@]+"${HOST_BINS[@]}"}; do
+  sign --options runtime --identifier "ai.storyteller.figcraft.${h#figcraft-}" "$APP/Contents/MacOS/$h"
+done
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP/Contents/MacOS/FigCraft"
 sign --options runtime --entitlements "$HERE/entitlements.plist" "$APP"
 codesign --verify --strict --deep --verbose=2 "$APP"
@@ -168,6 +204,10 @@ if [ "$HAS_CLI" = 1 ]; then
   mkdir -p "$CLI_DIR"
   cp "$WORK/bin/figcraft-cli" "$CLI_DIR/"
   copy_docs "$CLI_DIR"
+  copy_spine_hosts "$CLI_DIR" "$CLI_DIR"
+  for h in ${HOST_BINS[@]+"${HOST_BINS[@]}"}; do
+    sign --options runtime --identifier "ai.storyteller.figcraft.${h#figcraft-}" "$CLI_DIR/$h"
+  done
   # Same Developer ID and hardened runtime as the app, with an explicit reverse-DNS identifier
   # (codesign would otherwise use the bare file name).
   sign --options runtime --identifier ai.storyteller.figcraft-cli "$CLI_DIR/figcraft-cli"

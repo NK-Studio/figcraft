@@ -1,6 +1,6 @@
 # Spine skeletons
 
-> **Last updated:** 2026-10-21 · **Change:** minor (Spine 4.2 and 4.3 through the official spine-cpp in a host process; imports take the export's folder only; Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
+> **Last updated:** 2026-10-21 · **Change:** minor (the Spine hosts ship in the macOS and Windows packages; Spine 4.2 and 4.3 through the official spine-cpp in a host process; imports take the export's folder only; Spine 4.3 skeletons: import, posing, presentation playback, `.figcraft` storage and Unity export)
 
 FigCraft places [Spine](https://esotericsoftware.com/) 4.2 and 4.3 skeleton exports as layers, poses them
 at an animation, skin and time, plays them in presentation and carries them into Unity exports. A
@@ -36,7 +36,21 @@ checkout per version in `SPINE_RUNTIMES_DIR` (default `../spine-runtimes`: `4.2/
 `--fetch` makes sparse clones of the official repository there) and copies them beside the debug
 and release builds. The app looks for them in `FIGCRAFT_SPINE_HOST_DIR`, beside its executable, or
 one folder up. Without them everything builds, tests and runs: 4.3 files use the built-in runtime,
-4.2 files are refused with a message naming the host. Release packages don't bundle hosts yet.
+4.2 files are refused with a message naming the host.
+
+**In release packages.** `packaging/macos/package.sh` and `packaging/windows/package.ps1` build
+the hosts for the package's architecture (`cargo xtask spine-host --out DIR --tag NAME`; CMake
+reads `CMAKE_OSX_ARCHITECTURES` / `CMAKE_GENERATOR_PLATFORM`) and ship them beside the app with the
+Spine Runtimes License (`LICENSE-spine-runtimes.txt`, which redistribution must include):
+
+| Package | Hosts | Licence |
+|---|---|---|
+| macOS `FigCraft.app` | `Contents/MacOS/` (signed, hardened runtime, `ai.storyteller.figcraft.spine-host-4.x`) | `Contents/Resources/Licenses/` |
+| macOS CLI zip | beside `figcraft-cli` (signed) | beside it |
+| Windows MSI | the install folder, beside `figcraft.exe` (signed) | the install folder |
+| Windows portable zip | beside `figcraft.exe` | beside it |
+
+Without the spine-runtimes checkouts the scripts warn and package without hosts.
 
 ## Licensing
 

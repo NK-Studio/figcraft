@@ -5,13 +5,14 @@
 
     wix build figcraft.wxs -arch x64 -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext
       -culture en-US -loc figcraft.en-us.wxl -d Version=1.2.3 -d DisplayVersion=1.2.3-rc.1
-      -d BinDir=... -d IconPath=... -d BannerBmp=... -d DialogBmp=... -d HasCli=1 -o out.msi
+      -d BinDir=... -d IconPath=... -d BannerBmp=... -d DialogBmp=... -d HasCli=1 -d HasSpineHost=1 -o out.msi
 
   Per-machine install with a setup wizard that names the version: Welcome, install folder
   (Program Files\FigCraft by default, remembered for upgrades), Ready, a progress page, and a
   Finish page with a ticked "Launch FigCraft" box. Installs a Start Menu shortcut, makes
   FigCraft the owner of `.figcraft`, and offers it under "Open with" for SVG, PNG and JPEG
-  (without taking over the user's default app for them), plus figcraft-cli when HasCli=1.
+  (without taking over the user's default app for them), plus figcraft-cli when HasCli=1, and the
+  Spine hosts with the Spine Runtimes License when HasSpineHost=1 (docs/spine.md).
   `msiexec /qn` still installs silently.
 
   UpgradeCode is fixed for FigCraft forever (generated once; never reuse another app's).
@@ -119,6 +120,18 @@
 <?if $(var.HasCli) = 1 ?>
       <Component Id="FigcraftCli">
         <File Id="FigcraftCliExe" Source="$(var.BinDir)\figcraft-cli.exe" KeyPath="yes" />
+      </Component>
+<?endif?>
+<?if $(var.HasSpineHost) = 1 ?>
+      <!-- The official spine-cpp in processes of their own, beside figcraft.exe where it looks. -->
+      <Component Id="SpineHost42">
+        <File Id="SpineHost42Exe" Source="$(var.BinDir)\figcraft-spine-host-4.2.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="SpineHost43">
+        <File Id="SpineHost43Exe" Source="$(var.BinDir)\figcraft-spine-host-4.3.exe" KeyPath="yes" />
+      </Component>
+      <Component Id="SpineLicense">
+        <File Id="SpineLicenseTxt" Source="$(var.BinDir)\LICENSE-spine-runtimes.txt" KeyPath="yes" />
       </Component>
 <?endif?>
     </ComponentGroup>

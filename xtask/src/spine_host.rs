@@ -3,6 +3,12 @@
 //! debug and release builds, where the app finds them. spine-cpp (Spine Runtimes License) never
 //! enters the repository: it is read from `SPINE_RUNTIMES_DIR` (default `../spine-runtimes`), one
 //! checkout per version (`<dir>/4.2`, `<dir>/4.3`); `--fetch` makes sparse clones there.
+//!
+//! Packaging (`packaging/macos/package.sh`, `packaging/windows/package.ps1`) passes `--out DIR`:
+//! the hosts and the Spine Runtimes License (`LICENSE-spine-runtimes.txt`, which redistribution
+//! must include) go into DIR instead, built in `target/spine-host/<--tag>`. CMake picks up
+//! `CMAKE_OSX_ARCHITECTURES`, `MACOSX_DEPLOYMENT_TARGET` and `CMAKE_GENERATOR_PLATFORM` from the
+//! environment, so a package's architecture reaches the hosts.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -33,6 +39,9 @@ pub fn build(args: &[String]) -> bool {
     let root = root();
     let dir = std::env::var_os("SPINE_RUNTIMES_DIR").map(PathBuf::from).unwrap_or_else(|| root.join("../spine-runtimes"));
     let fetching = args.iter().any(|a| a == "--fetch");
+    let value = |flag: &str| args.iter().position(|a| a == flag).and_then(|i| args.get(i + 1)).cloned();
+    let out_dir = value("--out").map(PathBuf::from);
+    let tag = value("--tag").unwrap_or_else(|| "dev".into());
     let target = std::env::var_os("CARGO_TARGET_DIR").map(PathBuf::from).unwrap_or_else(|| root.join("target"));
     let mut built = 0;
     for version in ["4.2", "4.3"] {
@@ -44,7 +53,7 @@ pub fn build(args: &[String]) -> bool {
             eprintln!("spine-host: no spine-cpp {version} in {} (pass --fetch, or set SPINE_RUNTIMES_DIR)", dir.join(version).display());
             continue;
         };
-        let build = target.join(format!("spine-host/build-{version}"));
+        let build = target.join(format!("spine-host/{tag}/build-{version}"));
         let (b, c) = (build.to_string_lossy().into_owned(), cpp.to_string_lossy().into_owned());
         let src = root.join("tools/spine-host").to_string_lossy().into_owned();
         let ok = run(Command::new("cmake").args([
@@ -67,14 +76,24 @@ pub fn build(args: &[String]) -> bool {
             eprintln!("spine-host: {name} wasn't built");
             return false;
         };
-        for profile in ["debug", "release"] {
-            let out = target.join(profile);
-            if std::fs::create_dir_all(&out).and_then(|_| std::fs::copy(&exe, out.join(&name))).is_err() {
+        let outs = match &out_dir {
+            Some(d) => vec![d.clone()],
+            None => vec![target.join("debug"), target.join("release")],
+        };
+        for out in &outs {
+            if std::fs::create_dir_all(out).and_then(|_| std::fs::copy(&exe, out.join(&name))).is_err() {
                 eprintln!("spine-host: couldn't copy {name} into {}", out.display());
                 return false;
             }
+            eprintln!("spine-host: {name} → {}", out.display());
         }
-        eprintln!("spine-host: {name} → {}/{{debug,release}}", target.display());
+        // The licence the hosts are redistributed under.
+        if let Some(d) = &out_dir
+            && std::fs::copy(dir.join(version).join("LICENSE"), d.join("LICENSE-spine-runtimes.txt")).is_err()
+        {
+            eprintln!("spine-host: no LICENSE in {}", dir.join(version).display());
+            return false;
+        }
         built += 1;
     }
     if built == 0 {

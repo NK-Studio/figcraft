@@ -9,6 +9,11 @@
 
   figcraft-cli.exe is built and shipped once apps/figcraft-cli exists in the workspace.
 
+  The Spine hosts (figcraft-spine-host-4.2.exe / -4.3.exe, docs/spine.md) and the Spine Runtimes
+  License ship beside them when the spine-runtimes checkouts are there (SPINE_RUNTIMES_DIR, default
+  ..\spine-runtimes; `cargo xtask spine-host --fetch` makes them). They need CMake and the MSVC
+  C++ build tools; without the checkouts Spine 4.2 files won't open in the build (a warning).
+
   The binaries link the C runtime statically (+crt-static), so neither the MSI nor the portable
   zip needs the Visual C++ redistributable. Signing is delegated to sign.ps1 (skipped with a
   warning when no signing secrets are set).
@@ -93,8 +98,33 @@ foreach ($check in $checks) {
 $Stage = Join-Path $TargetDir "windows-package\$Arch"
 Remove-Item -Recurse -Force $Stage -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Stage | Out-Null
-$Exes = $Bins | ForEach-Object { "$_.exe" }
+$Exes = @($Bins | ForEach-Object { "$_.exe" })
 foreach ($exe in $Exes) { Copy-Item (Join-Path $Bin $exe) $Stage }
+
+# ---- Spine hosts -------------------------------------------------------------------------------
+# The official spine-cpp in processes of their own (tools/spine-host), for the same architecture
+# (CMAKE_GENERATOR_PLATFORM) with the static C runtime (CMakeLists.txt), beside figcraft.exe.
+$SpineRuntimes = if ($env:SPINE_RUNTIMES_DIR) { $env:SPINE_RUNTIMES_DIR } else { Join-Path $Root '..\spine-runtimes' }
+$HasSpineHost = $false
+if (Test-Path $SpineRuntimes) {
+  $SpineOut = Join-Path $TargetDir "windows-package\spine-host-$Arch"
+  Remove-Item -Recurse -Force $SpineOut -ErrorAction SilentlyContinue
+  $env:CMAKE_GENERATOR_PLATFORM = switch ($Arch) { 'x64' { 'x64' } 'x86' { 'Win32' } 'arm64' { 'ARM64' } }
+  Invoke-Native 'Spine hosts' { cargo xtask spine-host --out $SpineOut --tag "windows-$Arch" }
+  Remove-Item Env:\CMAKE_GENERATOR_PLATFORM
+  foreach ($v in '4.2', '4.3') {
+    $h = Join-Path $SpineOut "figcraft-spine-host-$v.exe"
+    if (-not (Test-Path $h)) { throw "figcraft-spine-host-$v.exe wasn't built" }
+    $pe = Get-PeHeader $h
+    if ($pe.Machine -ne $Machine) { throw "figcraft-spine-host-$v.exe is for machine 0x$('{0:X}' -f $pe.Machine), expected $Arch" }
+    Copy-Item $h $Stage
+    $Exes += "figcraft-spine-host-$v.exe"
+  }
+  Copy-Item (Join-Path $SpineOut 'LICENSE-spine-runtimes.txt') $Stage
+  $HasSpineHost = $true
+} else {
+  Write-Warning "no spine-runtimes in ${SpineRuntimes}: packaged without the Spine hosts (Spine 4.2 files won't open)"
+}
 
 & (Join-Path $PSScriptRoot 'sign.ps1') @($Exes | ForEach-Object { Join-Path $Stage $_ })
 
@@ -143,7 +173,7 @@ Invoke-Native 'wix build' {
     -ext WixToolset.UI.wixext -ext WixToolset.Util.wixext `
     -culture en-US -loc (Join-Path $PSScriptRoot 'figcraft.en-us.wxl') `
     -d "Version=$MsiVersion" -d "DisplayVersion=$Version" -d "BinDir=$Stage" -d "IconPath=$(Join-Path $Root 'assets\app-icon\figcraft.ico')" `
-    -d "BannerBmp=$Banner" -d "DialogBmp=$Dialog" -d "HasCli=$([int]$HasCli)" `
+    -d "BannerBmp=$Banner" -d "DialogBmp=$Dialog" -d "HasCli=$([int]$HasCli)" -d "HasSpineHost=$([int]$HasSpineHost)" `
     -o $Msi
 }
 Invoke-Native 'MSI shortcut icon validation (ICE50)' {
@@ -158,6 +188,7 @@ $Portable = Join-Path $TargetDir "windows-package\figcraft-$Version-windows-$Arc
 Remove-Item -Recurse -Force $Portable -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $Portable | Out-Null
 Copy-Item (Join-Path $Stage '*.exe') $Portable
+if ($HasSpineHost) { Copy-Item (Join-Path $Stage 'LICENSE-spine-runtimes.txt') $Portable }
 foreach ($f in 'README.md', 'LICENSE', 'LICENSE-MIT', 'LICENSE-APACHE', 'NOTICE') {
   $p = Join-Path $Root $f
   if (Test-Path $p) { Copy-Item $p $Portable }

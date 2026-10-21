@@ -48,7 +48,7 @@ fn main() -> ExitCode {
         "bench" => bench(args.get(1).map_or("1000,10000,50000", String::as_str)),
         "spine-host" => spine_host::build(&args[1..]),
         _ => {
-            eprintln!("tasks: ci, layers, assets, parity, version [set X.Y.Z], icon, wasm, plugins, bench [SIZES], spine-host [--fetch]");
+            eprintln!("tasks: ci, layers, assets, parity, version [set X.Y.Z], icon, wasm, plugins, bench [SIZES], spine-host [--fetch] [--out DIR --tag NAME]");
             task == "help"
         }
     };
