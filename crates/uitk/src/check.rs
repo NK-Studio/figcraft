@@ -139,6 +139,14 @@ impl Checker<'_> {
         if matches!(n.kind, NodeKind::Slice) {
             return;
         }
+        if matches!(n.kind, NodeKind::Spine(_)) {
+            self.push(
+                Severity::Info,
+                "spine",
+                "Spine skeleton: exported with its files and a setup-pose preview; animate it with the spine-unity runtime (UI Toolkit draws no Spine blend modes)",
+                None,
+            );
+        }
         if is_vector(&n.kind) {
             let since = Feature::VectorImage.since();
             if self.v().has(Feature::VectorImage) {

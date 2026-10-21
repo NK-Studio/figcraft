@@ -44,6 +44,37 @@ pub struct ImageFile {
     pub file: String,
 }
 
+/// A Spine skeleton in an exported document (listed in `<stem>.spine.json`): its element and the
+/// pose it shows. The setup pose is baked as the element's background for the UI Builder.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpineElement {
+    pub id: NodeId,
+    /// The element's `name` and class.
+    pub name: String,
+    pub class: String,
+    /// The skeleton and atlas files ([`SpineFiles`]).
+    pub skeleton: String,
+    pub atlas: String,
+    pub animation: Option<String>,
+    pub skin: Option<String>,
+    pub time: f64,
+    pub looping: bool,
+    pub playing: bool,
+    pub speed: f64,
+}
+
+/// A skeleton's files to write: `doc.spine[asset]`'s skeleton into `skeleton`, its atlas into
+/// `atlas` and its pages (image hashes) beside them, under the names the atlas gives them.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpineFiles {
+    pub asset: String,
+    pub skeleton: String,
+    pub atlas: String,
+    pub pages: Vec<ImageFile>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UitkDocument {
@@ -60,6 +91,8 @@ pub struct UitkDocument {
     pub safe_area: bool,
     /// The frame's UI scaling, for Unity's PanelSettings (`<stem>.panelsettings.json`).
     pub panel_settings: crate::PanelSettingsFile,
+    /// Its Spine skeletons (`<stem>.spine.json`, written when there are any).
+    pub spine: Vec<SpineElement>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
@@ -67,6 +100,7 @@ pub struct Export {
     pub documents: Vec<UitkDocument>,
     pub bakes: Vec<Bake>,
     pub images: Vec<ImageFile>,
+    pub spine: Vec<SpineFiles>,
     pub issues: Vec<Issue>,
 }
 
@@ -91,6 +125,7 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
     let mut out = Export::default();
     let mut stems = HashSet::new();
     let mut images: BTreeMap<String, String> = BTreeMap::new();
+    let mut spine: BTreeMap<String, SpineFiles> = BTreeMap::new();
     let mut seen = HashSet::new();
     for &id in frames {
         let Some(n) = doc.node(id) else { continue };
@@ -111,6 +146,8 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
             count: 0,
             bakes: Vec::new(),
             images: &mut images,
+            spine_files: &mut spine,
+            spine: Vec::new(),
             unit,
         };
         let safe_area = n.device.is_some();
@@ -123,6 +160,7 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
         );
         let uss = format!("/* Exported by FigCraft for Unity {} from \"{}\". */\n{}", opts.version, n.name.replace("*/", "* /"), w.uss);
         out.bakes.append(&mut w.bakes);
+        let spine_elements = std::mem::take(&mut w.spine);
         let panel_settings = scaling.file();
         out.documents.push(UitkDocument {
             frame: id,
@@ -134,9 +172,11 @@ pub fn export(doc: &Document, frames: &[NodeId], opts: impl Into<ExportOptions>)
             height: n.height,
             safe_area,
             panel_settings,
+            spine: spine_elements,
         });
     }
     out.images = images.into_iter().map(|(hash, file)| ImageFile { hash, file }).collect();
+    out.spine = spine.into_values().collect();
     let roots: Vec<NodeId> = out.documents.iter().map(|d| d.frame).collect();
     out.issues = crate::check(doc, &roots, opts);
     out
@@ -213,6 +253,10 @@ struct Writer<'a> {
     count: usize,
     bakes: Vec<Bake>,
     images: &'a mut BTreeMap<String, String>,
+    /// Skeleton files by asset key, shared by the documents.
+    spine_files: &'a mut BTreeMap<String, SpineFiles>,
+    /// This document's Spine elements.
+    spine: Vec<SpineElement>,
     /// Panel units per point: every length is multiplied by it.
     unit: f64,
 }
@@ -347,6 +391,10 @@ impl Writer<'_> {
         let class = self.class(n.id, "");
         let tag = if text { "ui:Label" } else { "ui:VisualElement" };
         let mut attrs = format!("name=\"{}\" class=\"{class}\"", xml(&n.name));
+        if let NodeKind::Spine(data) = &n.kind {
+            attrs = format!("name=\"{}\" class=\"{class} spine-skeleton\"", xml(&n.name));
+            self.spine_element(n, data, &class);
+        }
         if let NodeKind::Text(t) = &n.kind {
             let _ = write!(attrs, " text=\"{}\"", xml(&label_text(t, self.unit)));
         }
@@ -662,6 +710,10 @@ impl Writer<'_> {
         if matches!(n.kind, NodeKind::Text(_)) {
             return None;
         }
+        // A skeleton's preview: its box, so the PNG is the element's background.
+        if matches!(n.kind, NodeKind::Spine(_)) {
+            return self.doc.world_bounds(n.id).filter(|r| r.width() > 0.0 && r.height() > 0.0 && r.width() <= 16_384.0 && r.height() <= 16_384.0);
+        }
         let leaf = n.children.is_empty();
         let fills: Vec<&Paint> = n.fills.iter().filter(|p| p.visible).collect();
         let paint_needs = |p: &Paint| match &p.kind {
@@ -850,6 +902,44 @@ impl Writer<'_> {
         }
     }
 
+    /// Records Spine layer `n` and, once per skeleton, its files under `spine/<name>/`.
+    fn spine_element(&mut self, n: &Node, data: &figcraft_doc::SpineData, class: &str) {
+        let Some(asset) = self.doc.spine.get(&data.asset) else { return };
+        if !self.spine_files.contains_key(&data.asset) {
+            let taken: HashSet<String> = self.spine_files.values().map(|f| f.atlas.clone()).collect();
+            let base = file_name(&asset.name);
+            let folder = (1..)
+                .map(|i| if i == 1 { format!("spine/{base}") } else { format!("spine/{base}-{i}") })
+                .find(|f| !taken.contains(&format!("{f}/{base}.atlas.txt")))
+                .unwrap_or_else(|| format!("spine/{base}"));
+            let ext = if asset.binary { "skel.bytes" } else { "json" };
+            let pages = asset.pages.iter().map(|(page, hash)| ImageFile { hash: hash.clone(), file: format!("{folder}/{page}") }).collect();
+            self.spine_files.insert(
+                data.asset.clone(),
+                SpineFiles {
+                    asset: data.asset.clone(),
+                    skeleton: format!("{folder}/{base}.{ext}"),
+                    atlas: format!("{folder}/{base}.atlas.txt"),
+                    pages,
+                },
+            );
+        }
+        let Some(files) = self.spine_files.get(&data.asset) else { return };
+        self.spine.push(SpineElement {
+            id: n.id,
+            name: n.name.clone(),
+            class: class.to_string(),
+            skeleton: files.skeleton.clone(),
+            atlas: files.atlas.clone(),
+            animation: data.animation.clone(),
+            skin: data.skin.clone(),
+            time: data.time,
+            looping: data.looping,
+            playing: data.playing,
+            speed: data.speed,
+        });
+    }
+
     fn image_file(&mut self, hash: &str) -> String {
         if let Some(f) = self.images.get(hash) {
             return f.clone();
@@ -926,6 +1016,12 @@ fn scale_lengths(v: &str, k: f64) -> String {
 }
 
 /// An image's file extension from its first bytes.
+/// A file name from a layer or skeleton name: letters, digits, `-` and `_` (others become `_`).
+fn file_name(name: &str) -> String {
+    let s: String = name.chars().take(64).map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' }).collect();
+    if s.is_empty() { "skeleton".into() } else { s }
+}
+
 fn image_ext(b: &[u8]) -> &'static str {
     if b.starts_with(b"\x89PNG") {
         "png"

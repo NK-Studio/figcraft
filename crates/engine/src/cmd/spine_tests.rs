@@ -129,3 +129,31 @@ fn junk_on_a_spine_layer_never_panics() {
     assert!(figcraft_render::render_node(s.doc().unwrap(), figcraft_doc::NodeId(n), 1.0).is_some());
     std::fs::remove_dir_all(dir).ok();
 }
+
+#[test]
+fn unity_export_carries_the_skeleton_files() {
+    let dir = export_dir("unity");
+    let out = dir.join("unity");
+    let mut s = Session::new();
+    let f = id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 200, "height": 100, "name": "Screen"})).unwrap());
+    let n = id(&s.execute("spine.place", &json!({"path": dir.join("figure.json"), "parent": f, "x": 10, "y": 10, "name": "Hero"})).unwrap());
+    s.execute("spine.set", &json!({"ids": [n], "animation": "wave", "playing": true})).unwrap();
+    let check = s.execute("unity.check", &json!({"ids": [f]})).unwrap();
+    assert!(check["issues"].as_array().unwrap().iter().any(|i| i["rule"] == "spine"), "{check}");
+    let r = s.execute("file.exportUitk", &json!({"ids": [f], "dir": out})).unwrap();
+    let uxml = std::fs::read_to_string(out.join("Screen.uxml")).unwrap();
+    assert!(uxml.contains("name=\"Hero\"") && uxml.contains("spine-skeleton"), "{uxml}");
+    let uss = std::fs::read_to_string(out.join("Screen.uss")).unwrap();
+    assert!(uss.contains(&format!("baked-{n}.png")), "{uss}");
+    let manifest: Value = serde_json::from_slice(&std::fs::read(out.join("Screen.spine.json")).unwrap()).unwrap();
+    let sk = &manifest["skeletons"][0];
+    assert_eq!((sk["name"].clone(), sk["animation"].clone(), sk["playing"].clone()), (json!("Hero"), json!("wave"), json!(true)));
+    assert_eq!(sk["skeleton"], "spine/figure/figure.json");
+    assert_eq!(sk["atlas"], "spine/figure/figure.atlas.txt");
+    assert_eq!(std::fs::read_to_string(out.join("spine/figure/figure.json")).unwrap(), SKELETON_JSON);
+    assert_eq!(std::fs::read_to_string(out.join("spine/figure/figure.atlas.txt")).unwrap(), ATLAS);
+    assert!(out.join("spine/figure").join(PAGE.0).is_file());
+    assert!(out.join(format!("images/baked-{n}.png")).is_file());
+    assert_eq!(r["documents"][0]["spine"][0]["id"], n);
+    std::fs::remove_dir_all(dir).ok();
+}

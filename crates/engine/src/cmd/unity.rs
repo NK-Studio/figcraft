@@ -43,7 +43,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "file.exportUitk",
             "Export to Unity UI Toolkit",
-            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `<frame>.panelsettings.json` and `images/` into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2)} → {version, documents: [{frame, name, stem, width, height, safeArea, panelSettings (the frame's UI scaling for Unity's PanelSettings, or its short side), uxml?, uss?}], files?, bakes, images, counts, issues}",
+            "{ids? (top-level frames; default the selection's top-level frames, else every one on the page), textBoxes? (\"fixed\": labels keep FigCraft's text box size; \"auto\": Unity's font metrics size them; default the file's setting), dir? (a folder to write `<frame>.uxml`, `<frame>.uss`, `<frame>.panelsettings.json`, `images/`, and for Spine layers `<frame>.spine.json` and `spine/` into; without it the UXML and USS come back as text), version?, grid? (default the file's), scale? (baked images' pixels per point, 0.5–8, default 2)} → {version, documents: [{frame, name, stem, width, height, safeArea, panelSettings (the frame's UI scaling for Unity's PanelSettings, or its short side), spine (its Spine skeletons), uxml?, uss?}], files?, bakes, images, counts, issues}",
             false,
             file_export_uitk
         ),
@@ -258,7 +258,7 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         .documents
         .iter()
         .map(|d| {
-            let mut v = json!({"frame": d.frame, "name": d.name, "stem": d.stem, "width": d.width, "height": d.height, "safeArea": d.safe_area, "panelSettings": d.panel_settings});
+            let mut v = json!({"frame": d.frame, "name": d.name, "stem": d.stem, "width": d.width, "height": d.height, "safeArea": d.safe_area, "panelSettings": d.panel_settings, "spine": d.spine});
             if dir.is_none() {
                 v["uxml"] = json!(d.uxml);
                 v["uss"] = json!(d.uss);
@@ -294,6 +294,20 @@ fn file_export_uitk(s: &mut Session, p: &Value) -> Result<Value> {
         put(&format!("{}.uss", d.stem), d.uss.as_bytes())?;
         let settings = serde_json::to_string_pretty(&d.panel_settings).map_err(|e| bad(CMD, e.to_string()))?;
         put(&format!("{}.panelsettings.json", d.stem), format!("{settings}\n").as_bytes())?;
+        if !d.spine.is_empty() {
+            let manifest = serde_json::to_string_pretty(&json!({"skeletons": d.spine})).map_err(|e| bad(CMD, e.to_string()))?;
+            put(&format!("{}.spine.json", d.stem), format!("{manifest}\n").as_bytes())?;
+        }
+    }
+    for sk in &ex.spine {
+        let Some(asset) = doc.spine.get(&sk.asset) else { continue };
+        put(&sk.skeleton, &asset.skeleton)?;
+        put(&sk.atlas, asset.atlas.as_bytes())?;
+        for page in &sk.pages {
+            if let Some(data) = doc.images.get(&page.hash) {
+                put(&page.file, &data.bytes)?;
+            }
+        }
     }
     for (file, png) in &pngs {
         put(file, png)?;
