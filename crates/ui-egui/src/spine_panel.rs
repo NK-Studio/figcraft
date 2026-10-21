@@ -82,7 +82,8 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) ->
             if widgets::checkbox(ui, data.looping, tr("Loop")) {
                 app.run("spine.set", set(json!({"looping": !data.looping})));
             }
-            ui.add_space(12.0);
+        });
+        row(ui, 28.0, |ui| {
             if widgets::checkbox(ui, data.playing, tr("Play in presentation")) {
                 app.run("spine.set", set(json!({"playing": !data.playing})));
             }
