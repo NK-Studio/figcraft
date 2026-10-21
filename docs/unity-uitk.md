@@ -237,11 +237,18 @@ layers reaching into the unsafe bands (backgrounds) stay on the root. With an au
 the container is the flex container, with the frame's padding less the insets. At run time
 `FigcraftSafeArea` moves every container onto `Screen.safeArea`.
 
-**In Unity.** Copy the folder into `Assets/`, show `<Frame>.uxml` in a `UIDocument`, and add
-`FigcraftPanelScale` (set `designWidth` to the frame's portrait width in points; it switches the
-PanelSettings to Constant Pixel Size with `scale = short screen side / designWidth`) and
-`FigcraftSafeArea` next to it. Fonts are the project's: each label carries `--fc-font-family` and
-`--fc-font-style` for a project style sheet to map to font assets.
+**In Unity.** Copy the folder into `Assets/` and show `<Frame>.uxml` on a GameObject with a
+**`PanelRenderer`** from Unity 6.5 (`UIDocument` isn't used there; it's the 6.0–6.4 path), with its
+PanelSettings (a runtime theme), and add `FigcraftPanelScale` (set `designWidth` to the frame's
+portrait width in points; it switches the PanelSettings to Constant Pixel Size with
+`scale = short screen side / designWidth`) and `FigcraftSafeArea` next to it. The scripts pick the
+component by version (`#if UNITY_6000_5_OR_NEWER`): on 6.5+ they require a `PanelRenderer` and get
+its root from `RegisterUIReloadCallback` (the versioned callback from 6.6), before that a
+`UIDocument`. The scripts are the same in every export: keep one copy per project. Fonts are the
+project's: each label carries `--fc-font-family` and `--fc-font-style` for a project style sheet
+to map to font assets. Exported images must import as **Texture (Default)** or as a single Sprite
+with a full-rect mesh: a project that imports PNGs as Sprites (Multiple, tight mesh) trims their
+transparent edges and stretches what's left (seen with letterboxed card images).
 
 **Known limits (checked in U4):** whether Unity accepts `gap` on flex containers in 6.7 without the
 grid flag; absolute children in the padding box; the blur radius halving; gradient angles on
