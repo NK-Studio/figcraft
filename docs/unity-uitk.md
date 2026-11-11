@@ -178,8 +178,8 @@ file, with the defaults when it has no settings.
 
 **Right panel:** with nothing selected, *Unity* shows the checkbox *This file is for Unity* and,
 when it is on, the target version (a dropdown, 6.0 to the newest the table knows), the
-experimental grid checkbox from 6.7, *Keep FigCraft's text box sizes*, the page's check counts
-with the first issues, and *Export to Unity…*. With layers selected, the section shows only in a
+experimental grid checkbox from 6.7, *Keep FigCraft's text box sizes*, and the page's check counts
+with the first issues. With layers selected, the section shows only in a
 file for Unity (and on a layer that already has a pivot or a UI scaling of its own, so that data is
 never out of sight): for absolute layers the 9-point pivot picker (the pivot as numbers, whether it
 comes from the constraints or the layer, Reset), a top-level frame's UI scaling, and the
@@ -187,14 +187,21 @@ selection's counts and issues; clicking an issue selects its layer. It has no po
 whether a layer is in or out of its parent's auto layout is the Position section's *Ignore auto
 layout*, and a second control for it under the Auto layout section read as a contradiction
 ("Absolute (no auto layout parent)" on a frame that has auto layout). `unity.layer` still reports
-the position and `unity.layer.set {position}` still switches it. Results are cached per document revision.
+the position and `unity.layer.set {position}` still switches it. Exporting isn't in the Unity
+section: *Export to UI Toolkit…* is a button of the **Export** section, under the layer's own
+export button (the top-level frames the selection belongs to) and under *Export page as PNG* (the
+page's frames), with the check's "N errors · N warnings" above it when there are any. It is a
+button, not a format of the export settings: a setting is kept on a layer and writes one file,
+this writes a folder per top-level frame. It is named for UI Toolkit because the uGUI import is
+run from Unity (the `com.nkstudio.figcraft` package's import window). Results are cached per document revision.
 
 ## Export (U3)
 
 `file.exportUitk {ids?, dir?, version?, grid?, textBoxes?, scale?, scripts?}` exports top-level frames (the
 given ones' top-level frames, else the selection's, else every one on the page; frames in
 sections count). Without `dir` it returns the UXML and USS as text (agents, tests); with `dir` it
-writes, and the Design tab's Unity section has *Export to Unity…* (a folder picker):
+writes, and the Design tab's Export section has *Export to UI Toolkit…* (a folder picker) in a
+file for Unity:
 
 ```
 <dir>/<Frame>.uxml          one per frame (the name made file-safe and unique)
