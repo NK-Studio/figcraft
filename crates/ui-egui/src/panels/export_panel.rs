@@ -72,14 +72,52 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Arc<Document>, sel: &[NodeId
     for (i, e) in list.iter().enumerate() {
         setting_row(app, ui, &ids, i, e, text, doc.color_profile);
     }
-    let Some(first) = first else { return };
-    preview(app, ui, doc, first);
-    let label = match (layers.len(), name) {
-        (1, Some(name)) => trf("Export {name}", &[("name", &name)]),
-        (k, _) => trn("Export {n} layers", k, &[]),
+    if let Some(first) = first {
+        preview(app, ui, doc, first);
+        let label = match (layers.len(), name) {
+            (1, Some(name)) => trf("Export {name}", &[("name", &name)]),
+            (k, _) => trn("Export {n} layers", k, &[]),
+        };
+        if wide_button(ui, &label) {
+            export_layers(app, sel, false);
+        }
+    }
+    ui_toolkit_export(app, ui, doc, Some(sel));
+}
+
+/// "Export to UI Toolkit…", in a file that targets Unity: the top-level frames the selection
+/// belongs to (`sel`), or the page's (`None`), as UXML/USS into a folder. It is a button of its
+/// own, not a format of the export settings: a setting is kept on a layer and writes one file,
+/// while this writes a folder per top-level frame. Above it, the check's errors and warnings when
+/// there are any (the Unity section lists them).
+fn ui_toolkit_export(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: Option<&[NodeId]>) {
+    if doc.unity.is_none() {
+        return;
+    }
+    let roots: Vec<NodeId> = match sel {
+        Some(sel) => {
+            if !sel.iter().any(|i| doc.top_level_frame(*i).is_some()) {
+                return;
+            }
+            sel.to_vec()
+        }
+        None => match app.session.page() {
+            Ok(page) => vec![page],
+            Err(_) => return,
+        },
     };
-    if wide_button(ui, &label) {
-        export_layers(app, sel, false);
+    let t = Tokens::get(ui.ctx());
+    let (errors, warnings) = crate::unity_panel::error_and_warning_counts(app, ui, doc, &roots);
+    if errors + warnings > 0 {
+        let text = trf("{errors} errors · {warnings} warnings", &[("errors", &errors), ("warnings", &warnings)]);
+        let colour = if errors > 0 { t.danger } else { t.warning };
+        let width = ui.available_width();
+        let galley = ui.painter().layout(text, regular(11.0), colour, (width - widgets::PAD * 2.0).max(1.0));
+        let (r, _) = ui.allocate_exact_size(vec2(width, galley.size().y + 8.0), Sense::hover());
+        ui.painter().galley(pos2(r.min.x + widgets::PAD, r.min.y + 6.0), galley, colour);
+    }
+    if wide_button(ui, tr("Export to UI Toolkit…")) {
+        crate::unity_panel::export_to_folder(app, sel);
     }
 }
 
@@ -477,4 +515,5 @@ pub fn page_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, page: NodeId)
         let file = format!("{page_name}.{}", setting.format.ext());
         save_one(app, &all, &setting, &file);
     }
+    ui_toolkit_export(app, ui, doc, None);
 }

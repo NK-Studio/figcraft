@@ -3,6 +3,9 @@
 //! layers selected, the first one's Unity data (the 9-point pivot of an absolute layer, a
 //! top-level frame's UI scaling) and what the target version can't represent in the selection.
 //!
+//! Exporting isn't here either: "Export to UI Toolkit…" is in the Export section, with the other
+//! exports (`export_panel`), which calls [`export_to_folder`].
+//!
 //! Whether a layer is in or out of its parent's auto layout isn't shown here: the Position
 //! section's "Ignore auto layout" is that setting, and a second control for it under the Auto
 //! layout section read as a contradiction ("Absolute (no auto layout parent)" on a frame that
@@ -67,18 +70,14 @@ pub fn file_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     });
     let Ok(page) = app.session.page() else { return };
     issues(app, ui, doc, &[page]);
-    export_button(app, ui, None);
 }
 
-/// Export to a folder: `ids` (the selection's top-level frames), or every top-level frame.
-fn export_button(app: &mut FigApp, ui: &mut Ui, ids: Option<&[NodeId]>) {
-    let mut clicked = false;
-    row(ui, 36.0, |ui| clicked = widgets::button(ui, tr("Export to Unity…"), false, true).clicked());
-    if !clicked {
-        return;
-    }
+/// Asks for a folder and exports UXML/USS into it (`file.exportUitk`): the top-level frames `ids`
+/// belong to, or every top-level frame of the page. The Export section's "Export to UI Toolkit…"
+/// button runs it.
+pub(crate) fn export_to_folder(app: &mut FigApp, ids: Option<&[NodeId]>) {
     let ids = ids.map(<[NodeId]>::to_vec);
-    app.pick_folder(tr("Export to Unity…"), move |app, dir| {
+    app.pick_folder(tr("Export to UI Toolkit…"), move |app, dir| {
         let mut p = json!({"dir": dir.to_string_lossy()});
         if let Some(ids) = &ids {
             p["ids"] = json!(ids);
@@ -132,7 +131,6 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
         canvas_scaler_rows(app, ui, doc, first);
     }
     issues(app, ui, doc, sel);
-    export_button(app, ui, Some(sel));
     true
 }
 
@@ -297,19 +295,31 @@ fn pivot_row(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], pivot: figcraft_doc:
     }
 }
 
-/// The check's counts for `roots` and the first issues; a click on one selects its layer. The
-/// result is kept until the document, the roots or the settings change.
-fn issues(app: &mut FigApp, ui: &mut Ui, doc: &Document, roots: &[NodeId]) {
-    let t = Tokens::get(ui.ctx());
+/// The check's issues for `roots`, kept until the document, the roots or the settings change.
+fn checked(app: &FigApp, ui: &Ui, doc: &Document, roots: &[NodeId]) -> Vec<Issue> {
     let opts = figcraft_uitk::file_options(doc);
     let revision = app.session.ds().map(|d| d.revision).unwrap_or(0);
     let key = Id::unique(("unity_check", revision, roots.to_vec(), opts.version.minor, opts.grid_enabled));
     let found: Option<Vec<Issue>> = ui.data(|d| d.get_temp(key));
-    let found = found.unwrap_or_else(|| {
+    found.unwrap_or_else(|| {
         let v = figcraft_uitk::check(doc, roots, opts);
         ui.data_mut(|d| d.insert_temp(key, v.clone()));
         v
-    });
+    })
+}
+
+/// How many errors and warnings the check finds in `roots` (the Export section's summary beside
+/// its UI Toolkit button; the Unity section lists them).
+pub(crate) fn error_and_warning_counts(app: &FigApp, ui: &Ui, doc: &Document, roots: &[NodeId]) -> (usize, usize) {
+    let found = checked(app, ui, doc, roots);
+    let count = |s: Severity| found.iter().filter(|i| i.severity == s).count();
+    (count(Severity::Error), count(Severity::Warning))
+}
+
+/// The check's counts for `roots` and the first issues; a click on one selects its layer.
+fn issues(app: &mut FigApp, ui: &mut Ui, doc: &Document, roots: &[NodeId]) {
+    let t = Tokens::get(ui.ctx());
+    let found = checked(app, ui, doc, roots);
     let count = |s: Severity| found.iter().filter(|i| i.severity == s).count();
     let (e, w, i) = (count(Severity::Error), count(Severity::Warning), count(Severity::Info));
     row(ui, 28.0, |ui| {
