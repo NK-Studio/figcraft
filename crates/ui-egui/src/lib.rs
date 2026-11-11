@@ -276,6 +276,8 @@ mod ui_params_tests;
 #[cfg(test)]
 mod ui_scale_tests;
 #[cfg(test)]
+mod unity_panel_tests;
+#[cfg(test)]
 mod variable_picker_tests;
 #[cfg(test)]
 mod variables_export_ui_tests;

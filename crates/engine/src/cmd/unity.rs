@@ -22,14 +22,14 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "unity.settings",
             "Unity Settings",
-            "{} → {version, grid, fixedTextBoxes, versions (the ones the feature table knows)}",
+            "{} → {enabled (the file targets Unity: the Design tab shows its Unity section), version, grid, fixedTextBoxes, versions (the ones the feature table knows)}",
             false,
             unity_settings
         ),
         spec!(
             "unity.settings.set",
             "Set Unity Settings",
-            "{version? (\"6.0\"…), grid? (the Unity project enables UITK's experimental grid layout), fixedTextBoxes? (exports give labels FigCraft's text box size)} → the file's settings",
+            "{enabled? (true: the file targets Unity, with the settings it had or the defaults; false: it doesn't, and its Unity settings go back to the defaults; setting any other key turns it on), version? (\"6.0\"…), grid? (the Unity project enables UITK's experimental grid layout), fixedTextBoxes? (exports give labels FigCraft's text box size)} → the file's settings",
             true,
             unity_settings_set
         ),
@@ -89,10 +89,15 @@ fn unity_check(s: &mut Session, p: &Value) -> Result<Value> {
 }
 
 fn settings_json(s: &Session) -> Result<Value> {
-    let o = figcraft_uitk::file_export_options(s.doc()?);
-    Ok(
-        json!({"version": o.check.version, "grid": o.check.grid_enabled, "fixedTextBoxes": o.fixed_text_boxes, "versions": UnityVersion::known().collect::<Vec<_>>()}),
-    )
+    let doc = s.doc()?;
+    let o = figcraft_uitk::file_export_options(doc);
+    Ok(json!({
+        "enabled": doc.unity.is_some(),
+        "version": o.check.version,
+        "grid": o.check.grid_enabled,
+        "fixedTextBoxes": o.fixed_text_boxes,
+        "versions": UnityVersion::known().collect::<Vec<_>>(),
+    }))
 }
 
 fn unity_settings(s: &mut Session, _: &Value) -> Result<Value> {
@@ -101,6 +106,21 @@ fn unity_settings(s: &mut Session, _: &Value) -> Result<Value> {
 
 fn unity_settings_set(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "unity.settings.set";
+    let enabled = match get(p, "enabled") {
+        Some(e) => Some(params::bool_of(e).ok_or_else(|| bad(CMD, "`enabled` must be a boolean"))?),
+        None => None,
+    };
+    if enabled == Some(false) {
+        // A file that doesn't target Unity keeps no Unity settings: exports and checks use the
+        // defaults, and the Design tab hides its Unity section.
+        for key in ["version", "grid", "fixedTextBoxes"] {
+            if get(p, key).is_some() {
+                return Err(bad(CMD, format!("`{key}` can't be set while turning Unity off (`enabled: false`)")));
+            }
+        }
+        s.doc_mut()?.unity = None;
+        return settings_json(s);
+    }
     let mut o = figcraft_uitk::file_export_options(s.doc()?);
     if let Some(v) = get(p, "version") {
         o.check.version = version_of(CMD, v)?;
