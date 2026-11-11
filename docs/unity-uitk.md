@@ -165,18 +165,29 @@ updated with what Unity actually does.
 
 | Command | Params | Result |
 |---|---|---|
-| `unity.settings` | `{}` | `{version, grid, fixedTextBoxes, versions}` |
-| `unity.settings.set` | `{version?, grid?, fixedTextBoxes?}` (undo step) | the settings |
+| `unity.settings` | `{}` | `{enabled, version, grid, fixedTextBoxes, versions}` |
+| `unity.settings.set` | `{enabled?, version?, grid?, fixedTextBoxes?}` (undo step) | the settings |
 | `unity.layer` | `{id}` | `{position, inAutoLayout, pivot, pivotSet, anchorH, anchorV}` |
 | `unity.layer.set` | `{ids?, pivot? ([x, y], {x, y}, a name like "center", or null), position? ("relative" \| "absolute")}` (undo step) | `{ids}` |
 
-**Right panel:** with nothing selected, *Unity UI Toolkit* shows the target version (a dropdown,
-6.0 to the newest the table knows), the experimental grid checkbox from 6.7, *Keep FigCraft's text
-box sizes*, and the page's check
-counts with the first issues. With layers selected, it shows the first layer's position (a
-Relative/Absolute switch inside auto layout), for absolute layers the 9-point pivot picker (the
-pivot as numbers, whether it comes from the constraints or the layer, Reset), and the selection's
-counts and issues; clicking an issue selects its layer. Results are cached per document revision.
+**A file targets Unity when it has Unity settings** (`Document::unity` is set; `enabled` in
+`unity.settings`). `unity.settings.set {enabled: true}` turns that on with the defaults, any other
+key turns it on too, and `{enabled: false}` drops the file's Unity settings (the defaults come
+back). It only decides what the Design tab shows: `unity.check` and `file.exportUitk` work on any
+file, with the defaults when it has no settings.
+
+**Right panel:** with nothing selected, *Unity* shows the checkbox *This file is for Unity* and,
+when it is on, the target version (a dropdown, 6.0 to the newest the table knows), the
+experimental grid checkbox from 6.7, *Keep FigCraft's text box sizes*, the page's check counts
+with the first issues, and *Export to Unity…*. With layers selected, the section shows only in a
+file for Unity (and on a layer that already has a pivot or a UI scaling of its own, so that data is
+never out of sight): for absolute layers the 9-point pivot picker (the pivot as numbers, whether it
+comes from the constraints or the layer, Reset), a top-level frame's UI scaling, and the
+selection's counts and issues; clicking an issue selects its layer. It has no position row:
+whether a layer is in or out of its parent's auto layout is the Position section's *Ignore auto
+layout*, and a second control for it under the Auto layout section read as a contradiction
+("Absolute (no auto layout parent)" on a frame that has auto layout). `unity.layer` still reports
+the position and `unity.layer.set {position}` still switches it. Results are cached per document revision.
 
 ## Export (U3)
 

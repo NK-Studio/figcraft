@@ -1,6 +1,12 @@
-//! The Design tab's Unity UI Toolkit section (`docs/unity-uitk.md`): with nothing selected, the
-//! file's target Unity version and grid setting; with layers selected, how the first one is placed
-//! (position, the 9-point pivot) and what the target version can't represent in the selection.
+//! The Design tab's Unity section (`docs/unity-uitk.md`), for files that target Unity: with
+//! nothing selected, whether the file does, its target Unity version and export settings; with
+//! layers selected, the first one's Unity data (the 9-point pivot of an absolute layer, a
+//! top-level frame's UI scaling) and what the target version can't represent in the selection.
+//!
+//! Whether a layer is in or out of its parent's auto layout isn't shown here: the Position
+//! section's "Ignore auto layout" is that setting, and a second control for it under the Auto
+//! layout section read as a contradiction ("Absolute (no auto layout parent)" on a frame that
+//! has auto layout).
 
 use egui::{Align2, CornerRadius, Id, Rect, Sense, Stroke, StrokeKind, Ui, pos2, vec2};
 use figcraft_doc::{Document, NodeId};
@@ -19,11 +25,21 @@ const MAX_LISTED: usize = 12;
 const CELL: f32 = 14.0;
 const GAP: f32 = 4.0;
 
-/// With nothing selected: the file's Unity version and grid setting, and the page's counts.
+/// With nothing selected: whether the file targets Unity and, when it does, its Unity version,
+/// export settings and the page's counts. A file that doesn't shows the one checkbox.
 pub fn file_section(app: &mut FigApp, ui: &mut Ui, doc: &Document) {
     let t = Tokens::get(ui.ctx());
     let opts = figcraft_uitk::file_options(doc);
-    widgets::section_header(ui, tr("Unity UI Toolkit"), &[], false);
+    widgets::section_header(ui, tr("Unity"), &[], false);
+    let enabled = doc.unity.is_some();
+    row(ui, 28.0, |ui| {
+        if widgets::checkbox(ui, enabled, tr("This file is for Unity")) {
+            app.run("unity.settings.set", json!({"enabled": !enabled}));
+        }
+    });
+    if !enabled {
+        return;
+    }
     row(ui, 32.0, |ui| {
         widgets::label(ui, tr("Target version"), t.text_secondary);
         let resp = widgets::dropdown(ui, &format!("Unity {}", opts.version), 110.0, None);
@@ -74,13 +90,19 @@ fn export_button(app: &mut FigApp, ui: &mut Ui, ids: Option<&[NodeId]>) {
     });
 }
 
-/// With layers selected: position, pivot and the selection's issues.
-pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
+/// With layers selected: the first one's pivot (absolute layers), a top-level frame's UI scaling
+/// and the selection's issues. Returns whether the section was drawn: it is when the file targets
+/// Unity, and for a layer that already carries Unity data, so that data is never out of sight.
+pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) -> bool {
     let t = Tokens::get(ui.ctx());
-    let Some(first) = sel.first().copied() else { return };
-    let Some(info) = figcraft_uitk::layer_info(doc, first) else { return };
+    let Some(first) = sel.first().copied() else { return false };
+    let Some(info) = figcraft_uitk::layer_info(doc, first) else { return false };
+    let carries_unity_data = doc.node(first).is_some_and(|n| n.pivot.is_some() || n.canvas_scaler.is_some());
+    if doc.unity.is_none() && !carries_unity_data {
+        return false;
+    }
     let opts = figcraft_uitk::file_options(doc);
-    widgets::section_header(ui, tr("Unity UI Toolkit"), &[], false);
+    widgets::section_header(ui, tr("Unity"), &[], false);
     // The header's right end names the target version.
     let hr = ui.min_rect();
     ui.painter().text(
@@ -90,22 +112,6 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
         regular(11.0),
         t.text_secondary,
     );
-    row(ui, 32.0, |ui| {
-        widgets::label(ui, tr("Position"), t.text_secondary);
-        match info.position {
-            Position::Root => widgets::label(ui, tr("Panel root (top-level frame)"), t.text),
-            _ if !info.in_auto_layout => widgets::label(ui, tr("Absolute (no auto layout parent)"), t.text),
-            pos => {
-                let labels = [tr("Relative"), tr("Absolute")];
-                let active = usize::from(pos == Position::Absolute);
-                if let Some(i) = widgets::segmented_text(ui, &labels, active)
-                    && i != active
-                {
-                    app.run("unity.layer.set", json!({"ids": sel, "position": if i == 1 { "absolute" } else { "relative" }}));
-                }
-            }
-        }
-    });
     if info.position == Position::Absolute {
         pivot_row(app, ui, sel, info.pivot, info.pivot_set);
     }
@@ -127,6 +133,7 @@ pub fn layer_section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeI
     }
     issues(app, ui, doc, sel);
     export_button(app, ui, Some(sel));
+    true
 }
 
 /// A top-level frame's Unity UI scaling (uGUI CanvasScaler, UI Toolkit PanelSettings): none, a

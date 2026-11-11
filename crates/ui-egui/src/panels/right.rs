@@ -320,8 +320,9 @@ fn design(app: &mut FigApp, ui: &mut Ui) {
     if crate::spine_panel::section(app, ui, &shown, &sel) {
         widgets::separator(ui);
     }
-    crate::unity_panel::layer_section(app, ui, &shown, &sel);
-    widgets::separator(ui);
+    if crate::unity_panel::layer_section(app, ui, &shown, &sel) {
+        widgets::separator(ui);
+    }
     crate::export_panel::section(app, ui, &shown, &sel);
 }
 

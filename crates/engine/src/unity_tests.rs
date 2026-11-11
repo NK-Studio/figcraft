@@ -72,6 +72,37 @@ fn file_settings_drive_the_check_and_undo() {
 }
 
 #[test]
+fn a_file_targets_unity_only_when_turned_on() {
+    let mut s = Session::new();
+    // A new file doesn't target Unity; reading the settings doesn't turn it on.
+    assert_eq!(s.execute("unity.settings", &json!({})).unwrap()["enabled"], false);
+    assert!(s.doc().unwrap().unity.is_none());
+    // Turning it on keeps the defaults; any setting turns it on too.
+    let r = s.execute("unity.settings.set", &json!({"enabled": true})).unwrap();
+    assert_eq!((r["enabled"].clone(), r["version"].clone()), (json!(true), json!("6.0")));
+    s.execute("unity.settings.set", &json!({"enabled": false})).unwrap();
+    let r = s.execute("unity.settings.set", &json!({"version": "6.3", "fixedTextBoxes": true})).unwrap();
+    assert_eq!((r["enabled"].clone(), r["version"].clone()), (json!(true), json!("6.3")));
+    // Turning it off drops the file's Unity settings: the defaults come back.
+    let r = s.execute("unity.settings.set", &json!({"enabled": false})).unwrap();
+    assert_eq!((r["enabled"].clone(), r["version"].clone(), r["fixedTextBoxes"].clone()), (json!(false), json!("6.0"), json!(false)));
+    assert!(s.doc().unwrap().unity.is_none());
+    // One undo step, like any setting.
+    s.execute("edit.undo", &json!({})).unwrap();
+    let r = s.execute("unity.settings", &json!({})).unwrap();
+    assert_eq!((r["enabled"].clone(), r["version"].clone()), (json!(true), json!("6.3")));
+    // Junk and contradictions are refused, and leave the file as it was.
+    assert!(s.execute("unity.settings.set", &json!({"enabled": "maybe"})).is_err());
+    assert!(s.execute("unity.settings.set", &json!({"enabled": false, "version": "6.7"})).is_err());
+    assert_eq!(s.execute("unity.settings", &json!({})).unwrap()["version"], "6.3");
+    // The export doesn't need the file to target Unity.
+    s.execute("unity.settings.set", &json!({"enabled": false})).unwrap();
+    let f = s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap()["id"].as_u64().unwrap();
+    assert_eq!(s.execute("file.exportUitk", &json!({"ids": [f]})).unwrap()["documents"].as_array().unwrap().len(), 1);
+    assert!(s.doc().unwrap().unity.is_none());
+}
+
+#[test]
 fn layer_position_and_pivot() {
     let mut s = Session::new();
     let row = frame_with_gap(&mut s);
