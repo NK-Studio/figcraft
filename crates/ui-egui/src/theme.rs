@@ -29,8 +29,15 @@ pub struct Tokens {
     pub accent_text: Color32,
     pub selected_row: Color32,
     pub selected_row_child: Color32,
+    /// Component, variant and instance names and icons in the panels: at least 4.5:1 (WCAG AA
+    /// for text) on the panel, on a hovered row and on `component_row`. The canvas keeps
+    /// [`COMPONENT`] for its outlines and labels.
     pub component: Color32,
+    /// A selected component's row in the Layers panel.
     pub component_row: Color32,
+    /// The rows inside a selected component: a tone of its row (`selected_row_child` is the plain
+    /// selection's).
+    pub component_row_child: Color32,
     pub danger: Color32,
     pub success: Color32,
     pub warning: Color32,
@@ -61,7 +68,7 @@ const CANVAS_ACCENT: &str = "figcraft-canvas-accent";
 /// whichever green contrasts more with it: the bright one on a dark page, the darker on a light one.
 pub fn set_canvas_page(ctx: &Context, page: Color32) {
     let pick = if c(BRAND).contrast(c(page)) > c(ACCENT).contrast(c(page)) { BRAND } else { ACCENT };
-    ctx.data_mut(|d| d.insert_temp(egui::Id::new(CANVAS_ACCENT), pick));
+    ctx.data_mut(|d| d.insert_temp(egui::Id::unique(CANVAS_ACCENT), pick));
 }
 
 /// `x` (opaque) as a document colour, for its contrast with another.
@@ -71,13 +78,17 @@ fn c(x: Color32) -> figcraft_color::Color {
 
 /// The green for overlays drawn on the page ([`set_canvas_page`]); [`ACCENT`] before a page shows.
 pub fn canvas_accent(ctx: &Context) -> Color32 {
-    ctx.data(|d| d.get_temp(egui::Id::new(CANVAS_ACCENT))).unwrap_or(ACCENT)
+    ctx.data(|d| d.get_temp(egui::Id::unique(CANVAS_ACCENT))).unwrap_or(ACCENT)
 }
 
 /// A fill under white text: the darker green stands in for the bright one.
 pub fn under_white(c: Color32) -> Color32 {
     if c == BRAND { ACCENT } else { c }
 }
+
+/// An AI agent attached over MCP: its avatar and the outline of the layers it works on (none of
+/// the people colours, so it never looks like someone in a live session).
+pub const AGENT: Color32 = Color32::from_rgb(0xF5, 0x9E, 0x0B);
 
 pub const COMPONENT: Color32 = Color32::from_rgb(0x97, 0x47, 0xFF);
 /// Handoff status badges (white text on these, in both themes).
@@ -97,7 +108,9 @@ impl Tokens {
             text: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             // 4.7:1 on fields and hovered rows (#F5F5F5), 4.6:1 on selected rows: WCAG AA.
             text_secondary: Color32::from_rgb(0x6E, 0x6E, 0x6E),
-            text_tertiary: Color32::from_rgb(0x8A, 0x8A, 0x8A),
+            // Dim text: 3.2:1 on the selected component row (#F1E9FF, the tightest of the
+            // rows it lands on; #8A8A8A was 2.93:1 there), still dimmer than secondary text.
+            text_tertiary: Color32::from_rgb(0x84, 0x84, 0x84),
             icon: Color32::from_rgb(0x1E, 0x1E, 0x1E),
             icon_secondary: Color32::from_rgb(0x75, 0x75, 0x75),
             hover: Color32::from_rgb(0xF5, 0xF5, 0xF5),
@@ -111,8 +124,11 @@ impl Tokens {
             accent_text: Color32::from_rgb(0x00, 0x7A, 0x56),
             selected_row: Color32::from_rgb(0xE0, 0xFB, 0xF1),
             selected_row_child: Color32::from_rgb(0xF1, 0xFC, 0xF7),
-            component: COMPONENT,
+            // A shade darker than the canvas purple: 5.5:1 on white, 4.7:1 on the selected
+            // component row and 5.0:1 on a hovered row (the canvas purple reaches 3.8:1 and 4.1:1).
+            component: Color32::from_rgb(0x86, 0x38, 0xF0),
             component_row: Color32::from_rgb(0xF1, 0xE9, 0xFF),
+            component_row_child: Color32::from_rgb(0xF8, 0xF4, 0xFF),
             danger: Color32::from_rgb(0xF2, 0x48, 0x22),
             success: DEV_READY,
             warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
@@ -151,8 +167,11 @@ impl Tokens {
             accent_text: Color32::from_rgb(0x52, 0xE9, 0xB7),
             selected_row: Color32::from_rgb(0x16, 0x42, 0x36),
             selected_row_child: Color32::from_rgb(0x12, 0x37, 0x2D),
+            // 5.4:1 on the panel, 4.6:1 on the selected component row, 4.5:1 on a hovered row
+            // (the canvas purple reaches 3.1:1 and 2.7:1, #1903).
             component: Color32::from_rgb(0xD2, 0x7C, 0xFF),
             component_row: Color32::from_rgb(0x3E, 0x30, 0x52),
+            component_row_child: Color32::from_rgb(0x36, 0x2B, 0x47),
             danger: Color32::from_rgb(0xF2, 0x48, 0x22),
             success: DEV_READY,
             warning: Color32::from_rgb(0xFF, 0xCD, 0x29),
@@ -173,8 +192,9 @@ impl Tokens {
     }
 }
 
+/// Stable id for temporary theme tokens.
 fn tokens_id() -> egui::Id {
-    egui::Id::new("figcraft_tokens")
+    egui::Id::unique("figcraft_tokens")
 }
 
 /// egui's default for how long hover fades and openings animate.
@@ -280,8 +300,12 @@ pub fn menu_visuals() -> Visuals {
 
 /// UI fonts: Inter and the Archivo wordmark (from the craft-fonts build input) when present;
 /// otherwise egui's defaults. With
-/// `system`, also system faces for scripts those lack (Hebrew, joined Arabic) so names in them show,
+/// `system`, also system faces for scripts those lack (Hebrew, joined Arabic, Ethiopic, the Indic
+/// scripts and the others [`crate::bidi::script_fallbacks`] names) so names in them show,
 /// and faces for the CJK scripts in `cjk` ([`crate::cjk`]).
+///
+/// The craft-fonts set embeds Noto Sans Arabic and Noto Sans Hebrew; with `system` off those
+/// built-in faces are the whole RTL fallback, so tests and releases do not depend on installed fonts.
 pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     let mut fonts = FontDefinitions::default();
     let find = |family: &str, style: &str| figcraft_text::CRAFT_FONTS.iter().find(|f| f.family == family && f.style == style).map(|f| f.bytes);
@@ -318,7 +342,8 @@ pub fn install_fonts(ctx: &Context, system: bool, cjk: u8) {
     brand.extend(fonts.families.get(&FontFamily::Name("semibold".into())).cloned().unwrap_or_default());
     fonts.families.insert(FontFamily::Name("brand".into()), brand);
     // CJK and other scripts from craft-fonts as fallbacks (Noto Sans CJK only with FIGCRAFT_EMBED_CJK).
-    const BUILT_IN: [&str; 5] = ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Georgian"];
+    const BUILT_IN: [&str; 7] =
+        ["Inter", "BIZ UDPGothic", "Noto Sans CJK SC", "Noto Sans Arabic", "Noto Sans Hebrew", "Noto Sans Georgian", "Noto Sans Thai"];
     let lang = crate::i18n::current().map_or("en", |l| l.code);
     // A Chinese UI draws Han in a Chinese face: the built-in Japanese one goes after the system faces.
     let late = |family: &str| family == "BIZ UDPGothic" && crate::cjk::language(lang) == crate::cjk::HAN;
@@ -429,7 +454,7 @@ pub fn paint_app_icon(ui: &egui::Ui, rect: egui::Rect) {
         crate::icons::paint(ui.painter(), rect.shrink(rect.width() * 0.22), crate::icons::Icon::Logo, ACCENT_ON);
         return;
     };
-    let id = egui::Id::new("figcraft_original_app_icon");
+    let id = egui::Id::unique("figcraft_original_app_icon");
     let texture = ui.ctx().data(|data| data.get_temp::<egui::TextureHandle>(id)).unwrap_or_else(|| {
         let texture = ui.ctx().load_texture("figcraft-original-app-icon", image.clone(), egui::TextureOptions::LINEAR);
         ui.ctx().data_mut(|data| data.insert_temp(id, texture.clone()));
@@ -447,8 +472,9 @@ pub fn c32(c: figcraft_color::Color) -> Color32 {
     Color32::from_rgba_unmultiplied(r, g, b, a)
 }
 
+/// Stable id for the current document-to-screen colour conversion.
 fn screen_conversion_id() -> egui::Id {
-    egui::Id::new("figcraft_screen_conversion")
+    egui::Id::unique("figcraft_screen_conversion")
 }
 
 /// Remember the colour profile of the document on screen (once per frame): document colours drawn
@@ -497,7 +523,7 @@ mod tests {
             let theme = if t.dark { "dark" } else { "light" };
             // Disabled text (a disabled button's label, placeholders) on panels, fields and
             // selected rows, still dimmer than secondary text.
-            for bg in [t.panel, t.field, t.hover, t.selected_row] {
+            for bg in [t.panel, t.field, t.hover, t.selected_row, t.selected_row_child, t.component_row, t.component_row_child] {
                 let ratio = c(t.text_tertiary).contrast(c(bg));
                 assert!(ratio >= 3.0, "{theme}: dim text {:?} on {bg:?} is {ratio:.2}:1", t.text_tertiary);
                 assert!(ratio < c(t.text_secondary).contrast(c(bg)), "{theme}: dim text reads dimmer than secondary text");
@@ -530,6 +556,28 @@ mod tests {
                 for font in [regular(11.0), semibold(11.0)] {
                     assert!(f.has_glyphs(&font, &c.to_string()), "UI font draws {c:?}");
                 }
+            }
+        });
+    }
+
+    #[test]
+    fn ui_font_draws_thai_with_the_built_in_thai_face() {
+        // The web build has no system fonts: Thai layer names, frame labels and field text are drawn
+        // by craft-fonts' Noto Sans Thai, a built-in fallback, when the build embeds it.
+        if !figcraft_text::CRAFT_FONTS.iter().any(|f| f.family == "Noto Sans Thai") {
+            eprintln!("built without craft-fonts' Noto Sans Thai; skipping");
+            return;
+        }
+        let ctx = Context::default();
+        install_fonts(&ctx, false, 0);
+        let input =
+            egui::RawInput { screen_rect: Some(egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(100.0, 100.0))), ..Default::default() };
+        ctx.run_ui(input, |_| {}).textures_delta.clear();
+        // "ภาษาไทย" (the Thai language) and "น้ำ" (water: a tone mark over SARA AM).
+        let thai = "\u{0E20}\u{0E32}\u{0E29}\u{0E32}\u{0E44}\u{0E17}\u{0E22} \u{0E19}\u{0E49}\u{0E33}";
+        ctx.fonts_mut(|f| {
+            for font in [regular(11.0), semibold(11.0)] {
+                assert!(f.has_glyphs(&font, thai), "UI font draws {thai:?}");
             }
         });
     }

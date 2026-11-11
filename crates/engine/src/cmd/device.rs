@@ -129,6 +129,8 @@ fn device_import(s: &mut Session, p: &Value) -> Result<Value> {
 /// Keep `path` (made absolute) in the preferences' device sources, newest last.
 fn remember_source(s: &mut Session, path: &Path) {
     let p = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().into_owned();
+    // Kept at once (a crash doesn't lose it).
+    s.prefs_unsaved = true;
     let sources = &mut s.prefs.device_sources;
     sources.retain(|q| *q != p);
     sources.push(p);
@@ -298,6 +300,7 @@ fn device_remove(s: &mut Session, p: &Value) -> Result<Value> {
     if params::boolean(p, "all") == Some(true) {
         // Forget the remembered sources too, so they don't come back at the next start.
         s.prefs.device_sources.clear();
+        s.prefs_unsaved = true;
         return Ok(json!({"removed": s.devices.clear()}));
     }
     let id = params::req_string("device.remove", p, "id")?;

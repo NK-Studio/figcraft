@@ -71,9 +71,9 @@ pub fn section(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) ->
         let mut time = None;
         let mut speed = None;
         row(ui, 32.0, |ui| {
-            time = widgets::number_field(ui, Id::new("spine_time"), Lead::Text(tr("Time")), Some(data.time), "s", half, 0.01);
+            time = widgets::number_field(ui, Id::unique("spine_time"), Lead::Text(tr("Time")), Some(data.time), "s", half, 0.01);
             ui.add_space(8.0);
-            speed = widgets::number_field(ui, Id::new("spine_speed"), Lead::Text(tr("Speed")), Some(data.speed), "×", half, 0.1);
+            speed = widgets::number_field(ui, Id::unique("spine_speed"), Lead::Text(tr("Speed")), Some(data.speed), "×", half, 0.1);
         });
         let q = set(json!({}));
         app.field_run(time, "spine.set", |v| with(&q, "time", json!(v.max(0.0))));

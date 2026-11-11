@@ -34,10 +34,15 @@ fn a_command_that_changes_the_preferences_saves_them() {
         frame(&mut app, &ctx, n);
     }
     assert!(saved.lock().unwrap().is_empty(), "nothing changed, nothing written");
-    // Changed between frames, as a control request or an MCP call does.
-    app.session.prefs.font_folders = vec!["/fonts/game".into()];
+    // Changed between frames by a command, as a control request or an MCP call does.
+    let dir = std::env::temp_dir().join(format!("figcraft-prefs-at-once-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("game.ttf"), figcraft_text::fontdb::named_font_bytes(&[(0x0409, "Prefs At Once 7e1")])).unwrap();
+    app.session.execute("text.addFontFolder", &json!({"path": dir.to_string_lossy()})).unwrap();
     frame(&mut app, &ctx, 3);
-    assert_eq!(saved.lock().unwrap().last().map(|p| p.font_folders.clone()), Some(vec!["/fonts/game".to_string()]));
+    let _ = std::fs::remove_dir_all(&dir);
+    assert_eq!(saved.lock().unwrap().len(), 1, "written once");
+    assert!(saved.lock().unwrap().last().is_some_and(|p| p.font_folders.len() == 1));
     app.session.execute("text.fontFolders", &json!({"clear": true})).unwrap();
     frame(&mut app, &ctx, 4);
     let writes = saved.lock().unwrap().len();

@@ -178,7 +178,7 @@ fn canvas_scaler_rows(app: &mut FigApp, ui: &mut Ui, doc: &Document, id: NodeId)
     let Some(c) = c else { return };
     let num = |v: f64| format!("{}", (v * 1000.0).round() / 1000.0);
     let field = |ui: &mut Ui, key: &str, v: f64, w: f32, hint: &str| {
-        widgets::text_field(ui, Id::new(("cs", key, id)), &num(v), w, hint).and_then(|v| v.trim().parse::<f64>().ok())
+        widgets::text_field(ui, Id::unique(("cs", key, id)), &num(v), w, hint).and_then(|v| v.trim().parse::<f64>().ok())
     };
     match c.scale_mode {
         UiScaleMode::ScaleWithScreenSize => {
@@ -254,7 +254,7 @@ fn pivot_row(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], pivot: figcraft_doc:
         for gx in 0..3 {
             let (px, py) = (gx as f64 / 2.0, gy as f64 / 2.0);
             let cell = Rect::from_min_size(pos2(grid.min.x + gx as f32 * (CELL + GAP), grid.min.y + gy as f32 * (CELL + GAP)), vec2(CELL, CELL));
-            let resp = ui.interact(cell, Id::new(("unity_pivot", gx, gy)), Sense::click());
+            let resp = ui.interact(cell, Id::unique(("unity_pivot", gx, gy)), Sense::click());
             let on = (pivot.x - px).abs() < 1e-6 && (pivot.y - py).abs() < 1e-6;
             let fill = if on {
                 t.accent
@@ -281,7 +281,7 @@ fn pivot_row(app: &mut FigApp, ui: &mut Ui, sel: &[NodeId], pivot: figcraft_doc:
     ui.painter().text(pos2(text_x, grid.min.y + 26.0), Align2::LEFT_CENTER, note, regular(11.0), t.text_secondary);
     if set {
         let reset = Rect::from_min_size(pos2(text_x - 4.0, grid.min.y + 36.0), vec2(60.0, 18.0));
-        let resp = ui.interact(reset, Id::new("unity_pivot_reset"), Sense::click());
+        let resp = ui.interact(reset, Id::unique("unity_pivot_reset"), Sense::click());
         let col = if resp.hovered() { t.accent_hover } else { t.accent_text };
         ui.painter().text(pos2(text_x, reset.center().y), Align2::LEFT_CENTER, tr("Reset"), semibold(11.0), col);
         if resp.clicked() {
@@ -296,7 +296,7 @@ fn issues(app: &mut FigApp, ui: &mut Ui, doc: &Document, roots: &[NodeId]) {
     let t = Tokens::get(ui.ctx());
     let opts = figcraft_uitk::file_options(doc);
     let revision = app.session.ds().map(|d| d.revision).unwrap_or(0);
-    let key = Id::new(("unity_check", revision, roots.to_vec(), opts.version.minor, opts.grid_enabled));
+    let key = Id::unique(("unity_check", revision, roots.to_vec(), opts.version.minor, opts.grid_enabled));
     let found: Option<Vec<Issue>> = ui.data(|d| d.get_temp(key));
     let found = found.unwrap_or_else(|| {
         let v = figcraft_uitk::check(doc, roots, opts);

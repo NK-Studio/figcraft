@@ -22,7 +22,7 @@ pub enum Request {
 }
 
 fn request_id() -> Id {
-    Id::new("font_files_request")
+    Id::unique("font_files_request")
 }
 
 /// Ask for a font file or folder dialog; [`poll`] opens it at the end of the frame.

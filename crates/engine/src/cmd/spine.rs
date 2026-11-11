@@ -66,6 +66,19 @@ fn stem_of(path: &Path, suffixes: &[&str]) -> Option<String> {
     suffixes.iter().find_map(|s| lower.strip_suffix(s).filter(|st| !st.is_empty()).and_then(|st| name.get(..st.len())).map(str::to_string))
 }
 
+/// Folder `dir` holds a Spine skeleton (`.skel`, `.skel.bytes` or a skeleton `.json`), so
+/// importing it places the skeleton.
+pub(crate) fn holds_skeleton(dir: &Path) -> bool {
+    if !crate::file_access::is_dir(dir) {
+        return false;
+    }
+    let Ok(files) = crate::file_access::read_dir(dir) else { return false };
+    files.into_iter().take(MAX_FOLDER_FILES).filter(|p| crate::file_access::metadata(p).is_ok_and(|m| m.is_file())).any(|f| {
+        stem_of(&f, &[".skel.bytes", ".skel"]).is_some()
+            || (stem_of(&f, &[".json"]).is_some() && read(&f).is_ok_and(|b| figcraft_spine::is_skeleton_json(&b)))
+    })
+}
+
 /// The Spine export in folder `dir`: its skeleton (`<name>.json`, `<name>.skel` or Unity's
 /// `<name>.skel.bytes`), its atlas (`<name>.atlas` or `<name>.atlas.txt`) and the atlas pages, all
 /// in that folder. With several skeletons there, `skeleton` names the one to place.
