@@ -20,6 +20,7 @@ pub mod canvas;
 pub mod cjk;
 pub mod control;
 pub mod device_bezel;
+pub mod device_preview;
 pub mod dialogs;
 pub mod font_files;
 pub mod home;
@@ -102,6 +103,8 @@ mod dash_pattern_tests;
 mod design_paste_tests;
 #[cfg(test)]
 mod dev_mode_tests;
+#[cfg(test)]
+mod device_preview_tests;
 #[cfg(test)]
 mod devmode_tail_tests;
 #[cfg(test)]
@@ -494,6 +497,10 @@ pub struct UiState {
     pub present_view: present::PresentView,
     /// The prototype preview pane floating over the canvas, when open.
     pub preview: Option<present::Pane>,
+    /// The device preview pane floating over the canvas, when open (`device.preview`).
+    pub device_preview: Option<device_preview::DevicePreview>,
+    /// The device the preview shows, kept when the pane closes.
+    pub device_choice: device_preview::Choice,
     pub picker: Option<colorpicker::PickerTarget>,
     /// Crop mode (`image.crop`): the layer and the index of the image fill whose crop handles
     /// show on the canvas until Enter, Escape or a click outside the image.
@@ -694,6 +701,8 @@ impl Default for UiState {
             present_next: 1,
             present_view: present::PresentView::default(),
             preview: None,
+            device_preview: None,
+            device_choice: device_preview::Choice::default(),
             picker: None,
             crop: None,
             picker_popover: None,

@@ -30,7 +30,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "device.list",
             "Devices",
-            "{platform? (\"ios\" | \"android\" | \"other\")} → [{id, name, platform, source, screens: [{widthPx, heightPx, scale, widthPt, heightPt, orientations}]}]",
+            "{platform? (\"ios\" | \"android\" | \"other\")} → [{id, name, platform, source (\"builtin\" for FigCraft's own generic devices, `figcraft/…`), screens: [{widthPx, heightPx, scale, widthPt, heightPt, orientations}]}]",
             false,
             device_list
         ),
@@ -51,7 +51,7 @@ pub fn specs() -> Vec<CommandSpec> {
         spec!(
             "device.remove",
             "Remove Device",
-            "{id} | {all: true (also forgets the files and folders imported again at start-up)} → {removed: n}",
+            "{id (an imported device; the built-in ones stay)} | {all: true (every imported device; also forgets the files and folders imported again at start-up)} → {removed: n}",
             false,
             device_remove
         ),
@@ -301,14 +301,20 @@ fn device_remove(s: &mut Session, p: &Value) -> Result<Value> {
         // Forget the remembered sources too, so they don't come back at the next start.
         s.prefs.device_sources.clear();
         s.prefs_unsaved = true;
-        return Ok(json!({"removed": s.devices.clear()}));
+        return Ok(json!({"removed": s.devices.clear_imported()}));
     }
     let id = params::req_string("device.remove", p, "id")?;
-    Ok(json!({"removed": usize::from(s.devices.remove(&id))}))
+    if s.devices.get(&id).is_some_and(|d| d.source == figcraft_device::Source::BuiltIn) {
+        return Err(bad("device.remove", format!("`{id}` is a built-in device")));
+    }
+    let removed = s.devices.remove(&id);
+    // An import that took a built-in device's id gives it back.
+    s.devices.restore_builtin(&id);
+    Ok(json!({"removed": usize::from(removed)}))
 }
 
 /// What a frame keeps of device `d`'s screen `index` in orientation `o`, in points.
-fn frame_snapshot(d: &DeviceProfile, sc: &Screen, o: Orientation) -> DeviceFrame {
+pub(super) fn frame_snapshot(d: &DeviceProfile, sc: &Screen, o: Orientation) -> DeviceFrame {
     let (width, height) = sc.size_pt(o);
     let i = sc.insets_pt(o).unwrap_or_default();
     DeviceFrame {
@@ -334,34 +340,47 @@ fn frame_targets(cmd: &str, s: &Session, p: &Value) -> Result<Vec<NodeId>> {
     Ok(ids)
 }
 
+/// The device screen a command names: `device` (an imported profile), `screen?` and
+/// `orientation?` as a frame's snapshot, with the screen's index.
+pub(super) fn snapshot_param(cmd: &str, s: &Session, p: &Value) -> Result<(DeviceFrame, usize)> {
+    let device = params::req_string(cmd, p, "device")?;
+    let d = s.devices.get(&device).ok_or_else(|| bad(cmd, format!("no device `{device}` (see device.list; import with device.import)")))?;
+    let index = match get(p, "screen") {
+        None => 0,
+        Some(_) => params::req_index(cmd, p, "screen")?,
+    };
+    let sc = d.screen(index).ok_or_else(|| bad(cmd, format!("`screen` must be below {}", d.screens.len())))?;
+    let supported = sc.supported();
+    let o = match params::string(p, "orientation") {
+        None => *supported.first().ok_or_else(|| bad(cmd, "the device lists no orientations"))?,
+        Some(name) => Orientation::parse(&name).filter(|o| supported.contains(o)).ok_or_else(|| {
+            bad(cmd, format!("orientation must be one {} supports: {}", d.name, supported.iter().map(|o| o.name()).collect::<Vec<_>>().join(", ")))
+        })?,
+    };
+    Ok((frame_snapshot(d, sc, o), index))
+}
+
 fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
     const CMD: &str = "frame.device.set";
     let ids = frame_targets(CMD, s, p)?;
-    let device = params::req_string(CMD, p, "device")?;
-    let d = s.devices.get(&device).cloned().ok_or_else(|| bad(CMD, format!("no device `{device}` (see device.list; import with device.import)")))?;
-    let index = match get(p, "screen") {
-        None => 0,
-        Some(_) => params::req_index(CMD, p, "screen")?,
-    };
-    let sc = d.screen(index).ok_or_else(|| bad(CMD, format!("`screen` must be below {}", d.screens.len())))?;
-    let supported = sc.supported();
-    let o = match params::string(p, "orientation") {
-        None => *supported.first().ok_or_else(|| bad(CMD, "the device lists no orientations"))?,
-        Some(name) => Orientation::parse(&name).filter(|o| supported.contains(o)).ok_or_else(|| {
-            bad(CMD, format!("orientation must be one {} supports: {}", d.name, supported.iter().map(|o| o.name()).collect::<Vec<_>>().join(", ")))
-        })?,
-    };
-    let snap = frame_snapshot(&d, sc, o);
+    let (snap, _) = snapshot_param(CMD, s, p)?;
     let resize = params::boolean(p, "resize").unwrap_or(true);
+    put_on_device(s.doc_mut()?, &ids, &snap, resize)?;
+    Ok(json!({"ids": ids, "device": snap.id, "orientation": snap.orientation, "width": snap.width, "height": snap.height}))
+}
+
+/// Frames `ids` of `doc` take the device screen `snap` (`frame.device.set`): with `resize` they
+/// take its size in points and their layers follow, and they keep the snapshot. Works on any
+/// document, so the device preview runs the same steps on its copy ([`simulate`]).
+pub(crate) fn put_on_device(doc: &mut figcraft_doc::Document, ids: &[NodeId], snap: &DeviceFrame, resize: bool) -> Result<()> {
     // Layers inside the old device's safe area follow the safe area (as the SafeArea container
     // does in Unity): noted before the frame resizes, placed against the new one after.
-    let followers: Vec<SafeFollowers> = if resize { ids.iter().filter_map(|i| safe_followers(s.doc().ok()?, *i)).collect() } else { Vec::new() };
+    let followers: Vec<SafeFollowers> = if resize { ids.iter().filter_map(|i| safe_followers(doc, *i)).collect() } else { Vec::new() };
     if resize {
         // Constant Pixel Size and Constant Physical Size scale with the screen's density, not its
         // size: the contents take the new density's scale first (the frame with them, so that
         // the resize below only applies constraints), as Unity's canvas does.
-        let doc = s.doc_mut()?;
-        for i in &ids {
+        for i in ids {
             let n = doc.get(*i)?;
             let (Some(c), Some(old)) = (n.canvas_scaler, n.device.as_ref()) else { continue };
             let (w, h) = (n.width, n.height);
@@ -371,18 +390,17 @@ fn frame_device_set(s: &mut Session, p: &Value) -> Result<Value> {
                 figcraft_layout::set_size(doc, *i, w * k, h * k);
             }
         }
-        for i in &ids {
-            super::arrange::resize_cmd(s, &json!({"ids": [i], "width": snap.width, "height": snap.height}))?;
+        for i in ids {
+            super::arrange::resize_in(doc, vec![*i], &json!({"width": snap.width, "height": snap.height}))?;
         }
     }
-    let doc = s.doc_mut()?;
-    for i in &ids {
+    for i in ids {
         doc.get_mut(*i)?.device = Some(snap.clone());
     }
     for f in &followers {
-        place_followers(doc, f, &snap)?;
+        place_followers(doc, f, snap)?;
     }
-    Ok(json!({"ids": ids, "device": snap.id, "orientation": snap.orientation, "width": snap.width, "height": snap.height}))
+    Ok(())
 }
 
 fn frame_device_clear(s: &mut Session, p: &Value) -> Result<Value> {

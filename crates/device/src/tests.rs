@@ -268,3 +268,88 @@ fn mangled_files_never_panic() {
         let _ = parse(text.replace(from, to).as_bytes(), &ParseHint::default());
     }
 }
+
+#[test]
+fn built_in_devices_are_valid_and_survive_their_own_format() {
+    let all = catalog::builtin();
+    assert_eq!(all.len(), 11, "none was left out by the checks");
+    let mut ids: Vec<&str> = all.iter().map(|p| p.id.as_str()).collect();
+    assert!(ids.iter().all(|i| i.starts_with(catalog::PREFIX)));
+    ids.sort_unstable();
+    ids.dedup();
+    assert_eq!(ids.len(), all.len(), "ids are unique");
+    for p in &all {
+        assert_eq!(p.source, Source::BuiltIn);
+        // Written as a `figcraft-device` file and read back: the same screens, as an import.
+        let text = native::to_string(p).unwrap();
+        let back = parse(text.as_bytes(), &ParseHint::default()).unwrap();
+        assert_eq!((&back.id, &back.name, &back.screens), (&p.id, &p.name, &p.screens));
+        for sc in &p.screens {
+            assert!(sc.scale > 0.0 && !sc.orientations.is_empty(), "{}", p.id);
+            for o in sc.supported() {
+                // A cutout never reaches into the safe area: it lies in the bands round it.
+                let safe = sc.safe_area_px(o).unwrap();
+                for c in &sc.info(o).unwrap().cutouts {
+                    let apart = c.x + c.width <= safe.x || c.x >= safe.x + safe.width || c.y + c.height <= safe.y || c.y >= safe.y + safe.height;
+                    assert!(apart, "{} {}: cutout {c:?} in the safe area {safe:?}", p.id, o.name());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn built_in_cutouts_and_safe_areas_turn_with_the_device() {
+    let all = catalog::builtin();
+    let get = |id: &str| all.iter().find(|p| p.id == id).unwrap();
+    // A notch: under it in portrait, both sides in landscape (the notch on the side the top is on).
+    let notch = &get("figcraft/notch-phone").screens[0];
+    assert_eq!(notch.size_pt(Orientation::Portrait), (390.0, 844.0));
+    assert_eq!(notch.insets_pt(Orientation::Portrait).unwrap(), Insets { top: 47.0, bottom: 34.0, left: 0.0, right: 0.0 });
+    assert_eq!(notch.insets_pt(Orientation::LandscapeLeft).unwrap(), Insets { top: 0.0, bottom: 21.0, left: 47.0, right: 47.0 });
+    assert_eq!(notch.info(Orientation::LandscapeLeft).unwrap().cutouts, vec![PxRect { x: 0.0, y: 342.0, width: 96.0, height: 486.0 }]);
+    assert_eq!(notch.info(Orientation::LandscapeRight).unwrap().cutouts, vec![PxRect { x: 2436.0, y: 342.0, width: 96.0, height: 486.0 }]);
+    assert_eq!(notch.supported(), vec![Orientation::Portrait, Orientation::LandscapeLeft, Orientation::LandscapeRight]);
+    // A hole in the left corner: the safe area starts under it, and beside it when turned.
+    let hole = &get("figcraft/punch-hole-phone-left").screens[0];
+    assert_eq!(hole.scale, 2.625);
+    assert_eq!(hole.insets_px(Orientation::Portrait).unwrap(), Insets { top: 120.0, ..Insets::default() });
+    assert_eq!(hole.insets_px(Orientation::LandscapeLeft).unwrap(), Insets { left: 120.0, ..Insets::default() });
+    assert_eq!(hole.insets_px(Orientation::LandscapeRight).unwrap(), Insets { right: 120.0, ..Insets::default() });
+    assert_eq!(hole.info(Orientation::LandscapeLeft).unwrap().cutouts, vec![PxRect { x: 36.0, y: 948.0, width: 84.0, height: 84.0 }]);
+    assert_eq!(hole.info(Orientation::LandscapeRight).unwrap().cutouts, vec![PxRect { x: 2220.0, y: 48.0, width: 84.0, height: 84.0 }]);
+    // A foldable has its cover screen and its inner one, which also turns upside down.
+    let fold = get("figcraft/foldable-phone");
+    assert_eq!(fold.screens.len(), 2);
+    assert_eq!(fold.screens[1].supported(), Orientation::ALL.to_vec());
+    assert_eq!(fold.screens[1].insets_px(Orientation::PortraitUpsideDown).unwrap(), Insets { bottom: 120.0, ..Insets::default() });
+    // A tablet's home indicator stays at the bottom whichever way it is held.
+    let tablet = &get("figcraft/large-tablet").screens[0];
+    for o in Orientation::ALL {
+        assert_eq!(tablet.insets_px(o).unwrap(), Insets { bottom: 40.0, ..Insets::default() }, "{}", o.name());
+    }
+}
+
+#[test]
+fn a_registry_keeps_its_built_in_devices() {
+    let mut r = DeviceRegistry::with_builtin();
+    let n = r.len();
+    assert_eq!(n, catalog::builtin().len());
+    let mut mine = catalog::builtin().remove(0);
+    mine.id = "mine/phone".into();
+    mine.source = Source::Inline;
+    r.insert(mine.clone(), true).unwrap();
+    // An import may take a built-in device's id; removing it gives the built-in one back.
+    let mut over = mine.clone();
+    over.id = "figcraft/notch-phone".into();
+    r.insert(over, true).unwrap();
+    assert_eq!((r.len(), r.get("figcraft/notch-phone").unwrap().source.clone()), (n + 1, Source::Inline));
+    assert!(r.remove("figcraft/notch-phone"));
+    r.restore_builtin("figcraft/notch-phone");
+    assert_eq!(r.get("figcraft/notch-phone").unwrap().source, Source::BuiltIn);
+    r.restore_builtin("mine/phone");
+    r.restore_builtin("figcraft/nope");
+    assert_eq!(r.len(), n + 1);
+    assert_eq!(r.clear_imported(), 1);
+    assert_eq!((r.len(), r.get("mine/phone")), (n, None));
+}

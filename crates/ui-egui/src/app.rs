@@ -416,6 +416,7 @@ impl FigApp {
         // Before the shortcuts: keys the hovered pane's prototype uses don't reach the editor, and
         // the arrows step through comment threads with the Comment tool.
         present::show_pane(self, &ctx);
+        crate::device_preview::show(self, &ctx);
         comments::keys(self, &ctx);
         dev_compare::keys(self, &ctx);
         branch_ui::keys(self, &ctx);

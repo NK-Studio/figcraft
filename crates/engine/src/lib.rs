@@ -293,6 +293,8 @@ mod devcompare_tests;
 #[cfg(test)]
 mod devfocus_tests;
 #[cfg(test)]
+mod device_sim_tests;
+#[cfg(test)]
 mod device_tests;
 #[cfg(test)]
 mod devinspect_tests;
