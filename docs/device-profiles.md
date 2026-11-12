@@ -1,9 +1,11 @@
 # Device profiles and safe areas
 
 > **Status:** P1 landed (data model, Unity `.device` importer, `device.*` commands); P2 landed
-> (device frames: safe area and cutouts on the canvas). P3–P5 planned.
-> **Owner area:** `crates/device` (L2), `DeviceFrame` in `crates/doc/src/node.rs` (L1),
-> `crates/engine/src/cmd/device.rs` (L5), `crates/ui-egui/src/safe_area.rs` (L6).
+> (device frames: safe area and cutouts on the canvas); P3a landed (device preview: one device,
+> without touching the file); P5a landed (built-in generic devices). P3b, P4 and P5b planned.
+> **Owner area:** `crates/device` (L2; the built-in devices in `catalog.rs`), `DeviceFrame` in `crates/doc/src/node.rs` (L1),
+> `crates/engine/src/cmd/device.rs` and `device_sim.rs` (L5), `crates/ui-egui/src/safe_area.rs`,
+> `device_bezel.rs` and `device_preview.rs` (L6).
 
 ## Goal
 
@@ -29,8 +31,10 @@ FigCraft extension, not a parity item: the commands live outside the menu catalo
 - Test fixtures are synthetic `.device`-shaped JSON written for FigCraft with made-up numbers.
 - Overlay images are only ever referenced by path (the user's local file); FigCraft never ships,
   embeds or redistributes them. FigCraft's own device bezels stay drawn in code (`present.rs`).
-- A future built-in catalogue (P5) is authored from public platform documentation, never derived
-  from Unity's files.
+- The built-in devices ([Built-in devices](#built-in-devices-p5a)) are generic ones written for
+  FigCraft from what the platforms publish about their screens, never derived from Unity's files:
+  they don't claim to match a Unity device of a similar name. Import the user's own `.device`
+  file for that.
 
 ## Coordinate conventions
 
@@ -114,7 +118,8 @@ imported profile and edit it. Overlay paths in it are resolved relative to the f
 
 ## Engine (`Session::devices`)
 
-A per-session `DeviceRegistry` (ordered map id → profile). Paths imported with
+A per-session `DeviceRegistry` (ordered map id → profile), which starts with the built-in devices
+(`figcraft/…`, `source: "builtin"`); imported ones follow them. Paths imported with
 `device.import {path}` (without `scale`) are remembered in the preferences (`deviceSources`, at
 most 32) and imported again when the app starts; ones that are gone are skipped quietly, and
 `device.remove {all: true}` forgets them.
@@ -125,12 +130,15 @@ most 32) and imported again when the app starts; ones that are gone are skipped 
 | `device.list` | `{platform?}` | `[{id, name, platform, screens: [{widthPx, heightPx, scale, widthPt, heightPt, orientations}]}]` |
 | `device.get` | `{id, orientation? ("portrait"…/1–4), screen? (0)}` | size, safe area and insets in px and pt, cutouts, scale, overlay |
 | `device.export` | `{id, path?}` | the profile as `figcraft-device` JSON (written to `path` when given) |
-| `device.remove` | `{id}` / `{all: true}` | `{removed: n}` |
+| `device.remove` | `{id}` / `{all: true}` | `{removed: n}`: imported devices only. A built-in device is refused by id and stays after `all`; removing an import that took a built-in device's id brings that one back |
 | `frame.device.set` | `{ids?, device, orientation?, screen?, resize? (true)}` | `{ids, device, orientation, width, height}`: the frames take the device's size in points and keep a `DeviceFrame` |
 | `frame.device.clear` | `{ids?}` | `{cleared: n}` |
 | `view.safeAreas` | `{on?}` | View ▸ Safe areas (on by default; kept in the preferences like the other View toggles) |
+| `device.simulate` | `{frame?, device, orientation?, screen?, path? (a `.png`), scale? (0.1–4)}` | `{frame, device, name, orientation, screen, width, height, safeArea, cutouts, warnings: [{id, name, kind, edges, box}], path?}`: the frame as `frame.device.set` would leave it, worked out on a copy |
+| `device.preview` | `{frame?, device?, orientation?, screen?}` | opens the device preview pane (`{frame, device?, orientation?, screen?}`) |
+| `device.closePreview` | `{}` | closes it |
 
-The `device.*` commands don't edit the document, so none is an undo step; `frame.device.set` and
+The `device.*` commands (the preview's too) don't edit the document, so none is an undo step; `frame.device.set` and
 `frame.device.clear` are (one step each, resize included). File access goes through
 `file_access` (automation roots apply). Folder imports read at most 512 files.
 
@@ -174,21 +182,88 @@ without the profile or Unity installed.
   upside down ⇄ landscape left, else right) when the profile is imported; otherwise it drops the
   device with a message, since the turned safe area isn't known.
 
+## Built-in devices (P5a)
+
+So a design can be checked before anything is imported, every session starts with eleven generic
+devices (`crates/device/src/catalog.rs`). They are device *classes*, not models: common screen
+sizes with round safe areas and the usual cutouts, in portrait and both landscapes (tablets and
+the foldable's inner screen upside down too). A cutout turns with the device; a home indicator
+stays at the bottom.
+
+| Id (`figcraft/…`) | Name | Screen px (pt) | Safe area, portrait | Landscape |
+|---|---|---|---|---|
+| `notch-phone` | Notch Phone | 1170 × 2532 (390 × 844) | 47 pt top, 34 pt bottom | 47 pt each side, 21 pt bottom |
+| `notch-phone-large` | Notch Phone Large | 1284 × 2778 (428 × 926) | 47 / 34 pt | 47 pt sides, 21 pt bottom |
+| `notch-phone-small` | Notch Phone Small | 1080 × 2340 (375 × 812.5) | 50 / 34 pt | 50 pt sides, 21 pt bottom |
+| `classic-phone` | Classic Phone | 750 × 1334 (375 × 667) | none | none |
+| `punch-hole-phone-left` | Punch Hole Phone (Left) | 1080 × 2340 (411 × 891) | 120 px top | 120 px on the hole's side |
+| `punch-hole-phone-center` | Punch Hole Phone (Center) | 1440 × 3088 (461 × 988) | 140 px top | 140 px on the hole's side |
+| `punch-hole-phone-right` | Punch Hole Phone (Right) | 1080 × 2280 (411 × 869) | 120 px top | 120 px on the hole's side |
+| `pill-cutout-phone` | Pill Cutout Phone | 1200 × 2640 (427 × 939) | 140 px top | 140 px on the pill's side |
+| `large-tablet` | Large Tablet | 2048 × 2732 (1024 × 1366) | 20 pt bottom | 20 pt bottom |
+| `small-tablet` | Small Tablet | 1536 × 2048 (768 × 1024) | none | none |
+| `foldable-phone` | Foldable Phone | cover 1080 × 2520, inner 1840 × 2208 | 120 px top (each) | 120 px on the hole's side |
+
+They behave like imported devices everywhere (`device.list`, `device.get`, `frame.device.set`,
+the frame type dropdown, the device preview), and can be exported (`device.export`), edited and
+imported under another id, or under the same id to stand in for the built-in one. Each is built
+through the checks an imported file gets (`validate`), and a test holds every cutout outside its
+safe area in every orientation.
+
+## Device preview (P3a)
+
+Checking a design on another device shouldn't mean changing the design. The device preview shows
+a top-level frame as it would be on an imported device, on a copy of the document:
+
+- **One code path.** `figcraft_engine::cmd::device_sim::simulate` copies the document and runs the
+  steps of `frame.device.set` on the copy (`put_on_device`: the frame's UI scaling, the resize
+  with its constraints and auto layout, the layers that follow the safe area), then normalises it.
+  A test holds the two to the same boxes, with and without a canvas scaler, in portrait and
+  landscape. The file, its selection and its undo history are untouched.
+- **Warnings** (`device_sim::warnings`), top-most parents first, at most 200:
+  - `offscreen`: a layer sticks out of the screen on a side where it was inside the frame as
+    designed (not along an axis the frame scrolls, `overflow`);
+  - `safeArea`: a layer crosses the safe area's edge without reaching the screen's edge on that
+    side. A layer that reaches it is a background (it bleeds, as `DeviceFrame::holds` reads it),
+    and the layers in it are checked instead; text never counts as a background.
+
+  They are advice: a status bar drawn into the design is reported, and so is a list item cut by
+  the home indicator.
+- **`device.simulate`** answers the result as data for scripts, the CLI and MCP, and with `path`
+  draws the frame into a PNG (the laid-out frame only: the safe area and the body are the UI's).
+- **The pane** (`device.preview`; the Present button's menu ▸ Device preview; View ▸ Device
+  preview): a floating window over the canvas with the device's body, safe area and cutouts drawn
+  as on the canvas (View ▸ Safe areas and Device bezels apply). Its bar picks the device
+  (*Import devices…* is there too), turns it through the orientations the screen supports and
+  steps through the screens of a device with several (a foldable's cover and inner screens). The
+  layers with a warning are outlined; hovering one says why, a click selects it, and the count in
+  the status line selects them all. It follows edits live and shows the top-level frame selected
+  last; the device chosen is kept while the app runs. `ui.inspect` reports it under
+  `devicePreview`.
+
+Not yet: several devices side by side (P3b), a fold's hinge (the profile has no field for it), and
+playing a prototype on the device (the presenter keeps its own device list). With nothing
+imported the pane starts on the first built-in device.
+
 ## Phases
 
 - **P1 — data model + Unity importer** (landed): `crates/device`, `device.*` commands, tests
   with synthetic fixtures, junk-parameter sweep coverage.
 - **P2 — frames know their device** (landed): see [Device frames](#device-frames-p2).
-- **P3 — multi-device check**: resize a frame (constraints + auto layout re-run) to each chosen
-  device side by side; "outside safe area" warnings for layers whose bounds cross the insets; safe
-  area as layout guides.
+- **P3a — device preview** (landed): see [Device preview](#device-preview-p3a): one device at a
+  time on a copy of the document, with warnings for layers that cross the safe area or leave the
+  screen.
+- **P3b — multi-device check**: the same preview for several chosen devices side by side (saved
+  sets, one switch for all orientations); a fold's hinge in the `figcraft-device` format with a
+  warning for layers across it; `DeviceFrame` remembers which screen it stands for; safe area as
+  layout guides.
 - **P4 — Unity parity harness** (local, `plan/`): drive Unity's Device Simulator through its MCP/CLI
   for each device and orientation, dump `Screen.safeArea`/`Screen.cutouts`/`Screen.width/height`,
   and diff against `device.get` (px exact, pt within 0.5). Also a CanvasScaler emulation note:
   Unity UI uses reference resolution + match width/height, which differs from point-based layout.
-- **P5 — beyond Unity**: a built-in catalogue in `figcraft-device` format authored from public
-  platform docs (current iPhones/iPads/Android classes), user folders of `*.figdevice.json`, and
-  user-chosen overlay images (local paths, never shipped).
+- **P5a — built-in devices** (landed): see [Built-in devices](#built-in-devices-p5a).
+- **P5b — beyond Unity**: user folders of `*.figdevice.json`, user-chosen overlay images (local
+  paths, never shipped), and more built-in classes as the platforms' screens change.
 
 ## Open questions
 

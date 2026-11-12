@@ -30,7 +30,7 @@ impl Session {
             plugins: plugins::Runtime::default(),
             live: live::Lives::default(),
             background: background::Background::default(),
-            devices: figcraft_device::DeviceRegistry::default(),
+            devices: figcraft_device::DeviceRegistry::with_builtin(),
             events: Arc::new(events::EventLog::default()),
             pending_events: Vec::new(),
             agent: None,

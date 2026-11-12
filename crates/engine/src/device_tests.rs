@@ -71,11 +71,16 @@ fn import_unity_package_folder_skips_bad_files() {
     assert_eq!(r["imported"], json!(["unity/a-phone", "unity/b-phone"]));
     assert_eq!(r["skipped"].as_array().unwrap().len(), 1);
     assert!(r["skipped"][0]["file"].as_str().unwrap().ends_with("Broken.device"));
-    let list = s.execute("device.list", &json!({"platform": "ios"})).unwrap();
-    assert_eq!(list.as_array().unwrap().len(), 2);
+    // The imported ones, after FigCraft's built-in devices.
+    let imported = |s: &mut Session, platform: &str| -> Vec<Value> {
+        let list = s.execute("device.list", &json!({"platform": platform})).unwrap();
+        list.as_array().unwrap().iter().filter(|d| d["source"] != "builtin").cloned().collect()
+    };
+    let list = imported(&mut s, "ios");
+    assert_eq!(list.len(), 2);
     assert_eq!(list[0]["screens"][0]["widthPt"], 400.0);
     assert_eq!(list[0]["screens"][0]["orientations"], json!(["portrait", "landscapeLeft"]));
-    assert_eq!(s.execute("device.list", &json!({"platform": "android"})).unwrap(), json!([]));
+    assert_eq!(imported(&mut s, "android"), Vec::<Value>::new());
     let g = s.execute("device.get", &json!({"id": "unity/a-phone"})).unwrap();
     assert_eq!(std::path::Path::new(g["overlay"]["path"].as_str().unwrap()), devices.join("DeviceOverlays/frame.png"));
     // Without replace, a second import is skipped per file.
@@ -115,7 +120,7 @@ fn import_refusals() {
     assert!(s.execute("device.import", &json!({"text": unity_device("x").to_string(), "scale": 0})).is_err());
     assert!(s.execute("device.import", &json!({"path": "/definitely/not/here.device"})).is_err());
     assert!(s.execute("device.list", &json!({"platform": "palm"})).is_err());
-    assert_eq!(s.devices.len(), 0);
+    assert_eq!(s.devices.len(), figcraft_device::catalog::builtin().len(), "only the built-in devices");
 }
 
 fn node_id(v: &Value) -> figcraft_doc::NodeId {
@@ -427,4 +432,41 @@ fn a_safe_area_window_comes_back_after_a_device_without_one() {
     assert!(n(&s, bg).follows_safe_area);
     assert_eq!(s.execute("node.get", &json!({"id": bg})).unwrap()["followsSafeArea"], true);
     assert!(s.execute("node.set", &json!({"id": bg, "props": {"followsSafeArea": 3}})).is_err());
+}
+
+#[test]
+fn built_in_devices_are_there_from_the_start_and_stay() {
+    let mut s = Session::new();
+    let list = s.execute("device.list", &json!({})).unwrap();
+    let list = list.as_array().unwrap();
+    assert_eq!(list.len(), 11);
+    assert!(list.iter().all(|d| d["source"] == "builtin" && d["id"].as_str().unwrap().starts_with("figcraft/")));
+    assert_eq!(list[0]["id"], "figcraft/notch-phone");
+    let g = s.execute("device.get", &json!({"id": "figcraft/notch-phone", "orientation": "landscapeLeft"})).unwrap();
+    assert_eq!(g["sizePt"], json!({"width": 844.0, "height": 390.0}));
+    assert_eq!(g["insetsPt"], json!({"top": 0.0, "right": 47.0, "bottom": 21.0, "left": 47.0}));
+    // A foldable's second screen is its inner one.
+    let inner = s.execute("device.get", &json!({"id": "figcraft/foldable-phone", "screen": 1})).unwrap();
+    assert_eq!(inner["sizePx"], json!({"width": 1840.0, "height": 2208.0}));
+    // A frame takes one like an imported device.
+    let f = node_id(&s.execute("frame.create", &json!({"x": 0, "y": 0, "width": 100, "height": 100})).unwrap());
+    let r = s.execute("frame.device.set", &json!({"ids": [f], "device": "figcraft/classic-phone"})).unwrap();
+    assert_eq!((r["width"].clone(), r["height"].clone()), (json!(375.0), json!(667.0)));
+    // They can't be removed, one by one or all at once; imported ones go.
+    let e = s.execute("device.remove", &json!({"id": "figcraft/notch-phone"})).unwrap_err().to_string();
+    assert!(e.contains("built-in"), "{e}");
+    s.execute("device.import", &json!({"text": unity_device("Mine").to_string()})).unwrap();
+    assert_eq!(s.devices.len(), 12);
+    assert_eq!(s.execute("device.remove", &json!({"all": true})).unwrap()["removed"], 1);
+    assert_eq!(s.devices.len(), 11);
+    // An exported built-in device, edited and imported, stands in for it until it is removed.
+    let text = s.execute("device.export", &json!({"id": "figcraft/classic-phone"})).unwrap()["json"]
+        .as_str()
+        .unwrap()
+        .replace("Classic Phone", "My Classic");
+    s.execute("device.import", &json!({"text": text})).unwrap();
+    assert_eq!(s.execute("device.get", &json!({"id": "figcraft/classic-phone"})).unwrap()["name"], "My Classic");
+    assert_eq!(s.execute("device.remove", &json!({"id": "figcraft/classic-phone"})).unwrap()["removed"], 1);
+    assert_eq!(s.execute("device.get", &json!({"id": "figcraft/classic-phone"})).unwrap()["name"], "Classic Phone");
+    assert_eq!(s.devices.len(), 11);
 }

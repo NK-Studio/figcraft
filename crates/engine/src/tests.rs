@@ -458,6 +458,9 @@ fn every_command_survives_junk_params() {
         // Device profiles: files, text, scales, orientations and screens as junk.
         json!({"path": [5], "text": "{\"friendlyName\": 1, \"screens\": [{}]}", "scale": 1e308, "orientation": "sideways", "screen": -1, "platform": 7}),
         json!({"text": "{\"format\": \"figcraft-device\", \"screens\": [{\"widthPx\": 1e308}]}", "scale": "NaN", "orientation": 9, "screen": 1e308, "all": "maybe"}),
+        // The device preview: frames, devices, PNG paths and scales as junk.
+        json!({"frame": [1], "device": {"id": 1}, "orientation": 5, "screen": "one", "scale": "NaN", "path": {"png": true}}),
+        json!({"frame": -1, "device": "unity/\u{0}", "orientation": [], "screen": 1e308, "scale": -1e308, "path": null}),
         // Vector paths (`node.set {path}`) as junk. (Not a string `path` at the top: file commands
         // would write to it.)
         json!({"ids": [2, 3], "type": "vector", "path": [5], "width": -1e308, "props": {"path": "M0 0 L1e308 0 L-1e308 1e308", "height": "NaN", "x": 1e308}}),

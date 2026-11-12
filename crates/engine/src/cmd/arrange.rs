@@ -554,9 +554,15 @@ fn scale_cmd(s: &mut Session, p: &Value) -> Result<Value> {
 
 pub(crate) fn resize_cmd(s: &mut Session, p: &Value) -> Result<Value> {
     let ids = req_targets("transform.resize", s, p)?;
+    resize_in(s.doc_mut()?, ids, p)?;
+    ok()
+}
+
+/// `transform.resize` on a document: `ids` take `p`'s `width` and `height` about its `anchor`.
+/// Also used on copies of the document (the device preview lays a frame out for a device).
+pub(crate) fn resize_in(doc: &mut Document, ids: Vec<NodeId>, p: &Value) -> Result<()> {
     let (col, row) = string(p, "anchor").and_then(|a| crate::tools::anchor_of(&a)).unwrap_or((0, 0));
     let (ax, ay) = (f64::from(col) / 2.0, f64::from(row) / 2.0);
-    let doc = s.doc_mut()?;
     let before = super::styles::bound_before(doc, &ids);
     for i in ids {
         let n = doc.get(i)?;
@@ -587,7 +593,7 @@ pub(crate) fn resize_cmd(s: &mut Session, p: &Value) -> Result<Value> {
         super::props::restore_worlds(doc, &kept)?;
     }
     super::styles::detach_edited(doc, &before);
-    ok()
+    Ok(())
 }
 
 /// Reorder visual slots without rebuilding or reparenting layers.

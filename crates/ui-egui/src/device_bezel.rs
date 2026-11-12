@@ -4,7 +4,7 @@
 //! ever outside the screen (and in its corners and cutouts), so the design stays visible.
 
 use egui::{Color32, Mesh, Painter, Pos2, Rect, Shape, Stroke, pos2, vec2};
-use figcraft_doc::{Document, NodeId};
+use figcraft_doc::{DeviceFrame, Document, NodeId};
 use figcraft_geom::{Point, rotation_degrees};
 
 use crate::FigApp;
@@ -27,17 +27,29 @@ fn geometry(app: &FigApp, doc: &Document, id: NodeId) -> Option<(Rect, f32, f32,
     let m = doc.world_transform(id);
     let a = m * Point::new(0.0, 0.0);
     let b = m * Point::new(w, h);
-    let s = Rect::from_two_pos(app.to_screen(a.x, a.y), app.to_screen(b.x, b.y));
+    body(d, w, h, Rect::from_two_pos(app.to_screen(a.x, a.y), app.to_screen(b.x, b.y)))
+}
+
+/// How far the body reaches round a `w × h` point screen of device `d`, in points, and whether
+/// the device is a tablet (no side buttons).
+pub fn bezel_points(d: &DeviceFrame, w: f64, h: f64) -> (f32, bool) {
+    let lower = d.name.to_ascii_lowercase();
+    let tablet = lower.contains("ipad") || lower.contains("tab") || w.min(h) >= 600.0;
+    ((w.min(h) as f32 * if tablet { 0.05 } else { 0.06 }).max(6.0), tablet)
+}
+
+/// The bezel geometry (as [`geometry`]) round a `w × h` point screen of `d` drawn at `s`.
+fn body(d: &DeviceFrame, w: f64, h: f64, s: Rect) -> Option<(Rect, f32, f32, f32, bool, bool)> {
+    if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
+        return None;
+    }
     let z = s.width() / w as f32;
     if !(z.is_finite() && z > 0.0) {
         return None;
     }
-    let lower = d.name.to_ascii_lowercase();
-    let tablet = lower.contains("ipad") || lower.contains("tab") || w.min(h) >= 600.0;
-    let upright = w.min(h) as f32;
-    let bezel_pt = (upright * if tablet { 0.05 } else { 0.06 }).max(6.0);
+    let (bezel_pt, tablet) = bezel_points(d, w, h);
     let radius = d.corner_radius_for(w, h) as f32 * z;
-    Some((s, bezel_pt * z, rim(upright, bezel_pt) * z, radius, tablet, w > h))
+    Some((s, bezel_pt * z, rim(w.min(h) as f32, bezel_pt) * z, radius, tablet, w > h))
 }
 
 /// How far above the frame the body reaches (screen pixels), so the frame's label clears it.
@@ -46,7 +58,20 @@ pub fn lift(app: &FigApp, doc: &Document, id: NodeId) -> f32 {
 }
 
 pub fn draw(app: &FigApp, painter: &Painter, doc: &Document, id: NodeId) {
-    let Some((s, b, band, r, tablet, landscape)) = geometry(app, doc, id) else { return };
+    let Some(geo) = geometry(app, doc, id) else { return };
+    let Some(n) = doc.node(id) else { return };
+    let Some(d) = &n.device else { return };
+    paint(painter, geo, d, n.width, n.height);
+}
+
+/// The body of device `d` round its `w × h` point screen drawn at `s` (the device preview).
+pub fn draw_at(painter: &Painter, d: &DeviceFrame, w: f64, h: f64, s: Rect) {
+    if let Some(geo) = body(d, w, h, s) {
+        paint(painter, geo, d, w, h);
+    }
+}
+
+fn paint(painter: &Painter, (s, b, band, r, tablet, landscape): (Rect, f32, f32, f32, bool, bool), d: &DeviceFrame, w: f64, h: f64) {
     let (body, edge) = (shade(BODY, 0.0), shade(BODY, -0.35));
     let slab = s.expand(b);
     let outer_r = r + b;
@@ -73,10 +98,8 @@ pub fn draw(app: &FigApp, painter: &Painter, doc: &Document, id: NodeId) {
     if r > 0.0 {
         painter.add(corner_masks(s, r.min(s.width() / 2.0).min(s.height() / 2.0), GLASS));
     }
-    let Some(n) = doc.node(id) else { return };
-    let Some(d) = &n.device else { return };
-    let z = s.width() / n.width as f32;
-    for c in d.cutouts_for(n.width, n.height) {
+    let z = s.width() / w as f32;
+    for c in d.cutouts_for(w, h) {
         let cr = Rect::from_min_size(pos2(s.min.x + c.x as f32 * z, s.min.y + c.y as f32 * z), vec2(c.width as f32 * z, c.height as f32 * z));
         let round = (cr.width().min(cr.height()) / 2.0).min(255.0) as u8;
         painter.rect_filled(cr, egui::CornerRadius::same(round), Color32::BLACK);

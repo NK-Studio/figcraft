@@ -163,6 +163,15 @@ pub fn right_panel(app: &mut FigApp, ui: &mut Ui) {
             app.run(cmd, json!({}));
             ui.close();
         }
+        let (label, cmd) = if app.ui.device_preview.is_some() {
+            (tr("Close device preview"), "device.closePreview")
+        } else {
+            (tr("Device preview"), "device.preview")
+        };
+        if menu_item(ui, label, "") {
+            app.run(cmd, json!({}));
+            ui.close();
+        }
     });
     // Tabs row.
     let (tabs, _) = ui.allocate_exact_size(vec2(w, 40.0), Sense::hover());
@@ -512,14 +521,7 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                 }
                 if menu_item(ui, tr("Import devices…"), "") {
                     ui.close();
-                    app.pick_folder(tr("Import devices…"), |app, dir| {
-                        if let Some(r) = app.run("device.import", json!({"path": dir.to_string_lossy()})) {
-                            let n = r["imported"].as_array().map_or(0, Vec::len);
-                            app.toast(trn("Imported {n} devices", n, &[]));
-                            // The folder is imported again at the next start.
-                            app.save_prefs();
-                        }
-                    });
+                    crate::device_preview::import_devices(app);
                 }
                 ui.separator();
                 ui.label(egui::RichText::new(tr("Sizes only (not a device)")).font(semibold(11.0)).color(t.text_secondary));

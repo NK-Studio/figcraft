@@ -5,6 +5,7 @@ pub mod comment;
 pub mod component;
 pub mod create;
 pub mod device;
+pub mod device_sim;
 pub mod edit;
 pub mod facilitate;
 pub mod file;
@@ -101,6 +102,7 @@ fn registry() -> &'static Registry {
         list.extend(proto::specs());
         list.extend(proto_actions::specs());
         list.extend(device::specs());
+        list.extend(device_sim::specs());
         list.extend(unity::specs());
         list.extend(spine::specs());
         list.extend(comment::specs());

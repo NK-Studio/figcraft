@@ -6,6 +6,7 @@
 //! with a top-left origin and points derived from them. Nothing here touches the file system or
 //! panics: every input is validated ([`validate`]) and refused with a [`DeviceError`].
 
+pub mod catalog;
 pub mod native;
 pub mod unity;
 
@@ -307,6 +308,8 @@ pub enum Source {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         file: Option<String>,
     },
+    /// One of FigCraft's own generic devices ([`catalog`]).
+    BuiltIn,
     /// Given as text, not a file.
     #[default]
     Inline,
@@ -317,6 +320,7 @@ impl Source {
         match self {
             Self::UnityDevice { .. } => "unity",
             Self::FigCraft { .. } => "figcraft",
+            Self::BuiltIn => "builtin",
             Self::Inline => "inline",
         }
     }
@@ -521,6 +525,28 @@ pub struct DeviceRegistry {
 }
 
 impl DeviceRegistry {
+    /// A registry holding FigCraft's built-in devices ([`catalog::builtin`]).
+    pub fn with_builtin() -> Self {
+        Self { profiles: catalog::builtin() }
+    }
+
+    /// Remove every imported device, leaving the built-in ones as they come (one an import had
+    /// replaced is back). Returns how many imported devices went.
+    pub fn clear_imported(&mut self) -> usize {
+        let n = self.profiles.iter().filter(|p| p.source != Source::BuiltIn).count();
+        *self = Self::with_builtin();
+        n
+    }
+
+    /// Put the built-in device `id` back when it is missing (an import with its id was removed).
+    pub fn restore_builtin(&mut self, id: &str) {
+        if self.get(id).is_none()
+            && let Some(p) = catalog::builtin().into_iter().find(|p| p.id == id)
+        {
+            self.profiles.push(p);
+        }
+    }
+
     /// Add `p`, replacing the profile with the same id when `replace` (otherwise that is an
     /// error). Returns whether one was replaced.
     pub fn insert(&mut self, p: DeviceProfile, replace: bool) -> Result<bool> {

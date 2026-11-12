@@ -232,6 +232,8 @@ impl FigApp {
                     }
                 }
                 "preview.close" => self.ui.preview = None,
+                "devicePreview" => crate::device_preview::open(self, &r.data),
+                "devicePreview.close" => self.ui.device_preview = None,
                 "open.help" => self.services.open_url("https://getartcraft.com/apps/figcraft"),
                 // A link in text activated while editing (`text.openLink`): the engine checked it
                 // is a web or mail link.

@@ -3,7 +3,7 @@
 //! corners outlined, all in the frame's own coordinates (they turn with it).
 
 use egui::{Painter, Pos2, Shape, Stroke};
-use figcraft_doc::{Document, NodeId};
+use figcraft_doc::{DeviceFrame, Document, NodeId};
 use figcraft_geom::Point;
 
 use crate::FigApp;
@@ -15,15 +15,19 @@ const ARC_STEPS: usize = 8;
 pub fn draw(app: &FigApp, painter: &Painter, t: &Tokens, doc: &Document, id: NodeId) {
     let Some(n) = doc.node(id) else { return };
     let Some(d) = &n.device else { return };
-    let (w, h) = (n.width, n.height);
+    let m = doc.world_transform(id);
+    draw_with(painter, t, d, n.width, n.height, |x, y| {
+        let p = m * Point::new(x, y);
+        app.to_screen(p.x, p.y)
+    });
+}
+
+/// The safe area of device `d` on a `w × h` point screen, `to_screen` placing a point of the
+/// screen (top-left origin) in the window: the canvas's frames, and the device preview.
+pub fn draw_with(painter: &Painter, t: &Tokens, d: &DeviceFrame, w: f64, h: f64, to_screen: impl Fn(f64, f64) -> Pos2) {
     if !(w.is_finite() && h.is_finite() && w > 0.0 && h > 0.0) {
         return;
     }
-    let m = doc.world_transform(id);
-    let to_screen = |x: f64, y: f64| {
-        let p = m * Point::new(x, y);
-        app.to_screen(p.x, p.y)
-    };
     let quad = |x0: f64, y0: f64, x1: f64, y1: f64| vec![to_screen(x0, y0), to_screen(x1, y0), to_screen(x1, y1), to_screen(x0, y1)];
     let i = d.insets_for(w, h);
     let band = t.danger.gamma_multiply(0.16);
