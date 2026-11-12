@@ -229,6 +229,8 @@ mod board_tools_tests;
 #[cfg(test)]
 mod boolean_cap_tests;
 #[cfg(test)]
+mod boolean_radius_tests;
+#[cfg(test)]
 mod booleans_tests;
 #[cfg(test)]
 mod bound_alpha_tests;
@@ -331,6 +333,8 @@ mod extended_chain_tests;
 #[cfg(test)]
 mod eyedropper_create_tests;
 #[cfg(test)]
+mod eyedropper_image_tests;
+#[cfg(test)]
 mod facilitate_tests;
 #[cfg(test)]
 mod fig_export_assets_tests;
@@ -428,6 +432,8 @@ mod live_signal_tests;
 mod live_tests;
 #[cfg(test)]
 mod lock_behaviour_tests;
+#[cfg(test)]
+mod marquee_behaviour_tests;
 #[cfg(test)]
 mod mask_tests;
 #[cfg(test)]

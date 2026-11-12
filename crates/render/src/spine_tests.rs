@@ -61,7 +61,7 @@ fn doc(time: f64, animation: Option<&str>) -> (Document, figcraft_doc::NodeId) {
 }
 
 fn px(doc: &Document, id: figcraft_doc::NodeId, x: u32, y: u32) -> [u8; 4] {
-    let pix = crate::area_at(doc, &[id], Rect::new(0.0, 0.0, 64.0, 32.0), 1.0, 0.0).unwrap();
+    let pix = crate::area_at(doc, &[id], None, Rect::new(0.0, 0.0, 64.0, 32.0), 1.0, 0.0).unwrap();
     let c = pix.pixel(x, y).unwrap();
     [c.red(), c.green(), c.blue(), c.alpha()]
 }
