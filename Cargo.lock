@@ -1892,7 +1892,7 @@ dependencies = [
 
 [[package]]
 name = "figcraft-device"
-version = "0.15.0"
+version = "0.18.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2084,7 +2084,7 @@ dependencies = [
 
 [[package]]
 name = "figcraft-spine"
-version = "0.15.0"
+version = "0.18.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -2157,7 +2157,7 @@ dependencies = [
 
 [[package]]
 name = "figcraft-uitk"
-version = "0.15.0"
+version = "0.18.1"
 dependencies = [
  "figcraft-doc",
  "serde",
