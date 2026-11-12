@@ -132,7 +132,7 @@ most 32) and imported again when the app starts; ones that are gone are skipped 
 | `device.export` | `{id, path?}` | the profile as `figcraft-device` JSON (written to `path` when given) |
 | `device.remove` | `{id}` / `{all: true}` | `{removed: n}`: imported devices only. A built-in device is refused by id and stays after `all`; removing an import that took a built-in device's id brings that one back |
 | `frame.device.set` | `{ids?, device, orientation?, screen?, resize? (true)}` | `{ids, device, orientation, width, height}`: the frames take the device's size in points and keep a `DeviceFrame` |
-| `frame.device.clear` | `{ids?}` | `{cleared: n}` |
+| `frame.device.clear` | `{ids?}` | `{cleared: n}` (`node.set {device: null}` does the same beside other properties, in their step) |
 | `view.safeAreas` | `{on?}` | View ▸ Safe areas (on by default; kept in the preferences like the other View toggles) |
 | `device.simulate` | `{frame?, device, orientation?, screen?, path? (a `.png`), scale? (0.1–4)}` | `{frame, device, name, orientation, screen, width, height, safeArea, cutouts, warnings: [{id, name, kind, edges, box}], path?}`: the frame as `frame.device.set` would leave it, worked out on a copy |
 | `device.preview` | `{frame?, device?, orientation?, screen?}` | opens the device preview pane (`{frame, device?, orientation?, screen?}`) |
@@ -165,7 +165,9 @@ without the profile or Unity installed.
 - **Right panel**: the frame type dropdown lists the imported devices first under *Devices* (their
   portrait size), then *Clear device* when a selected frame has one, and *Import devices…* (a
   folder picker; the folder is remembered); the size presets follow under *Sizes only (not a
-  device)*, since they only set the frame's size.
+  device)*: they set the frame's size and drop its device (`node.set {width, height, device:
+  null}`, one undo step), so a frame turned into a desktop screen or an A4 page loses the phone's
+  body, notch and safe area.
 - **Changing the device**: layers inside the safe area are placed against the new device's safe
   area by their constraints, as Unity's SafeArea container places them; other layers follow the
   frame (`DeviceFrame::holds`). A layer flush with a frame edge bleeds (backgrounds), unless it also

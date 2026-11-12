@@ -541,7 +541,9 @@ fn header(app: &mut FigApp, ui: &mut Ui, doc: &Document, sel: &[NodeId]) {
                         ui.label(egui::RichText::new(tr(c)).font(semibold(11.0)).color(t.text_secondary));
                     }
                     if menu_item(ui, name, &format!("{}×{}", pw, ph)) {
-                        app.set_props(&ids, json!({"width": pw, "height": ph}));
+                        // Not a device: a frame that stood for one drops it (its body, notch and
+                        // safe area) in the same step.
+                        app.set_props(&ids, json!({"width": pw, "height": ph, "device": null}));
                         ui.close();
                     }
                 }

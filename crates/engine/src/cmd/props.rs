@@ -34,7 +34,7 @@ fontVariations / variationSettings ({axis: number}, e.g. {\"wght\": 550, \"wdth\
 path (a vector's SVG path data: replaces its geometry, keeping the layer, its paints, styles and bindings; width/height in the same call scale it as \
 node.create does; its own box goes at the layer's x/y, or with x/y given, at x + its left edge and y + its top as node.create places it), pointCount, innerRadius, arcStart, arcSweep, \
 arcInner, booleanOperation (a boolean group's operation, or an operand's own; null: the group's), operandOperation (a layer in a boolean \
-group: how it combines with the operands below it; null: the group's), constrainProportions, description, interactions, overflow, pluginData {k: v}";
+group: how it combines with the operands below it; null: the group's), constrainProportions, description, interactions, overflow, device (null only: drops a frame's device, its safe area, cutouts and body; frame.device.set puts one on), pluginData {k: v}";
 
 /// CRLF, bare CR, U+2028 and U+2029 become LF, the only line ending text layout understands (editor insertion does the same).
 pub(crate) fn normalize_line_endings(s: &str) -> String {
@@ -955,6 +955,10 @@ fn apply_meta(cmd: &str, doc: &mut Document, id: NodeId, k: &str, v: &Value) -> 
         "scrollPosition" => doc.get_mut(id)?.scroll_position = enum_of(v).ok_or_else(|| bad(cmd, "scrollPosition: scrolls|fixed|sticky"))?,
         "constrainProportions" => doc.get_mut(id)?.constrain_proportions = v.as_bool().ok_or_else(|| bad(cmd, format!("`{k}` must be a boolean")))?,
         "followsSafeArea" => doc.get_mut(id)?.follows_safe_area = v.as_bool().ok_or_else(|| bad(cmd, "`followsSafeArea` must be true or false"))?,
+        // Only clearing: a size that isn't a device (a size preset) drops the device with its
+        // safe area, cutouts and body in the same step. `frame.device.set` puts one on.
+        "device" if v.is_null() => doc.get_mut(id)?.device = None,
+        "device" => return Err(bad(cmd, "`device` takes only null (no device); frame.device.set puts a frame on a device")),
         _ => return Ok(false),
     }
     Ok(true)

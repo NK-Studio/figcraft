@@ -160,6 +160,27 @@ fn frame_takes_device_size_and_safe_area_in_one_undo_step() {
     assert!(s.doc().unwrap().node(f).unwrap().device.is_none());
 }
 
+/// A size preset (the frame type menu's *Sizes only (not a device)*: Desktop, A4…) sends
+/// `node.set {width, height, device: null}`: the frame takes the size and drops the device, so no
+/// phone body or notch is drawn round a page, in one undo step.
+#[test]
+fn a_size_that_is_not_a_device_drops_the_device_in_one_undo_step() {
+    let (mut s, f) = session_with_device("Test Phone");
+    s.execute("frame.device.set", &json!({"ids": [f], "device": "unity/test-phone"})).unwrap();
+    s.execute("node.set", &json!({"ids": [f], "props": {"width": 595, "height": 842, "device": null}})).unwrap();
+    let n = s.doc().unwrap().node(f).unwrap();
+    assert_eq!((n.width, n.height, n.device.is_none()), (595.0, 842.0, true));
+    assert!(s.execute("node.get", &json!({"id": f})).unwrap().get("device").is_none_or(Value::is_null));
+    s.execute("edit.undo", &json!({})).unwrap();
+    let n = s.doc().unwrap().node(f).unwrap();
+    assert_eq!((n.width, n.height), (400.0, 866.6667));
+    assert_eq!(n.device.as_ref().map(|d| d.id.as_str()), Some("unity/test-phone"));
+    // Only null: a device goes on through frame.device.set, and a refused call changes nothing.
+    let e = s.execute("node.set", &json!({"ids": [f], "props": {"width": 10, "device": "unity/test-phone"}})).unwrap_err().to_string();
+    assert!(e.contains("frame.device.set"), "{e}");
+    assert_eq!(s.doc().unwrap().node(f).unwrap().width, 400.0);
+}
+
 #[test]
 fn frame_device_refusals() {
     let (mut s, f) = session_with_device("Test Phone");
